@@ -267,14 +267,37 @@ def crop_resize_instance_v1(img, mask, hcoords, imheight, imwidth,
     target_height=int(imheight*resize_ratio)
     target_width=int(imwidth*resize_ratio)
 
+    # reduce image size by half centered around object
+    # h,w,_=img.shape
+    # hs,ws=np.nonzero(mask)
+
+    # hmin,hmax=np.min(hs),np.max(hs)
+    # wmin,wmax=np.min(ws),np.max(ws)
+    # hcenter = (hmin+hmax)/2
+    # wcenter = (wmin+wmax)/2
+    # hbeg = max(int(hcenter - (h/4)),0)
+    # hend = min(int(hcenter + (h/4)),h)
+    # wbeg = max(int(wcenter - (w/4)),0)
+    # wend = min(int(wcenter + (w/4)),w)
+    # print('img: ',img.shape)
+    # print('hcoords: ',hcoords.shape)
+    # img=img[hbeg:hend, wbeg:wend]
+    # mask=mask[hbeg:hend, wbeg:wend]
+    # hcoords[:, 0]-=wbeg*hcoords[:, 2]
+    # hcoords[:, 1]-=hbeg*hcoords[:, 2]
+    # print('img: ',img.shape)
+    # print('hcoords: ',hcoords.shape)
     img, mask, hcoords = crop_or_padding_to_fixed_size_instance(
         img, mask, hcoords, target_height, target_width, overlap_ratio)
-
+   
     img = cv2.resize(img, (imwidth, imheight), interpolation=cv2.INTER_LINEAR)
     mask = cv2.resize(mask, (imwidth, imheight), interpolation=cv2.INTER_NEAREST)
+    
+    # print(mask.shape)
 
     hcoords[:, 0] = hcoords[:, 0] / resize_ratio
     hcoords[:, 1] = hcoords[:, 1] / resize_ratio
+    # print(hcoords.shape)
 
     return img, mask, hcoords
 

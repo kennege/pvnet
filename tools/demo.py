@@ -84,7 +84,7 @@ def read_data():
 
     projector = Projector()
     points_2d = projector.project(points_3d, pose, 'linemod')
-    vertex = compute_vertex(mask, points_2d)
+    vertex = compute_vertex(mask, points_2d)    
 
     transformer = transforms.Compose([
         transforms.ToTensor(),

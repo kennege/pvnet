@@ -508,6 +508,10 @@ def b_inv(b_mat):
     :return:
     '''
     eye = b_mat.new_ones(b_mat.size(-1)).diag().expand_as(b_mat)
+    # for i in range(b_mat.shape[0]):
+    #     if sum(sum(b_mat[i]))==0:
+    #         b_mat[i] = 0.001 * torch.eye(2)
+
     b_inv, _ = torch.gesv(eye, b_mat)
     return b_inv
 

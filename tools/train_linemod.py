@@ -1,7 +1,7 @@
 import sys
 
 from skimage.io import imsave
-
+import time
 
 sys.path.append('.')
 sys.path.append('..')
@@ -30,6 +30,8 @@ import time
 from collections import OrderedDict
 import random
 import numpy as np
+from torch.utils.tensorboard import SummaryWriter
+import lib.datasets.linemod_dataset as ld
 
 with open(args.cfg_file,'r') as f:
     train_cfg=json.load(f)
@@ -82,11 +84,19 @@ class NetWrapper(nn.Module):
         self.net=net
         self.criterion=nn.CrossEntropyLoss(reduce=False)
 
-    def forward(self, image, mask, vertex, vertex_weights):
-        seg_pred, vertex_pred = self.net(image)
+    def forward(self, image, mask, vertex, vertex_weights, vertexEst):
+        seg_pred, vertex_pred = self.net(image, vertexEst)
         loss_seg = self.criterion(seg_pred, mask)
-        loss_seg = torch.mean(loss_seg.view(loss_seg.shape[0],-1),1)
+        loss_seg = torch.mean(loss_seg.view(loss_seg.shape[0],-1),1)      
+        # vertexMask = torch.zeros(image.shape[0],20,image.shape[2],image.shape[3])
+        # vertexMask[:,0:18,:,:] = vertex
+        # vertexMask[:,19:20,:,:] = mask.unsqueeze(1)
+        vertex_grad = -2*(vertex - vertexEst)
         loss_vertex = smooth_l1_loss(vertex_pred, vertex, vertex_weights, reduce=False)
+        # print(loss_vertex.shape)
+        # criterion = torch.nn.L1Loss()
+        # loss_vertex = criterion(vertex_pred*vertex_weights, vertex_grad*vertex_weights)
+        # print(loss_vertex.shape)
         precision, recall = compute_precision_recall(seg_pred, mask)
         return seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall
 
@@ -103,6 +113,7 @@ class EvalWrapper(nn.Module):
         if use_uncertainty:
             return ransac_voting_layer_v5(mask,vertex_pred,128,inlier_thresh=0.99,max_num=100)
         else:
+            # print(vertex_pred)
             return ransac_voting_layer_v3(mask,vertex_pred,128,inlier_thresh=0.99,max_num=100)
 
 class MotionEvalWrapper(nn.Module):
@@ -129,7 +140,7 @@ class UncertaintyEvalWrapper(nn.Module):
         mean, var=estimate_voting_distribution_with_mean(mask,vertex_pred,mean)
         return mean, var
 
-def train(net, optimizer, dataloader, epoch):
+def train(net, optimizer, dataloader, epoch, writer):
     for rec in recs: rec.reset()
     data_time.reset()
     batch_time.reset()
@@ -142,17 +153,36 @@ def train(net, optimizer, dataloader, epoch):
     for idx, data in enumerate(dataloader):
         image, mask, vertex, vertex_weights, pose, _ = [d.cuda() for d in data]
         data_time.update(time.time()-end)
-
-        seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights)
+               
+        ##
+        keypointEstInit = np.array([mask.shape[1]/2, mask.shape[2]/2, 1])  
+        vertexEstInit = torch.tensor(np.zeros((mask.shape[0],18,mask.shape[1],mask.shape[2]),dtype=np.float) )
+        hcoordsEstInit = np.zeros((9,3),dtype=np.float)        
+        hcoordsEstInit[:,:] = keypointEstInit
+        maskInit = np.ones((mask.shape[1],mask.shape[2]))
+        vertexEst = ld.compute_vertex_hcoords(maskInit,hcoordsEstInit) # initial eta hat 
+        vertexEst = torch.tensor(vertexEst, dtype= torch.float).permute(2, 0, 1)
+        vertexEstInit[:,:,:,:] = vertexEst
+        vertexLocal = vertexEstInit.float()
+        # for iter in range(5): # iterate until convergence
+        seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights, vertexLocal )
         loss_seg, loss_vertex, precision, recall=[torch.mean(val) for val in (loss_seg, loss_vertex, precision, recall)]
         loss = loss_seg + loss_vertex * train_cfg['vertex_loss_ratio']
+        
         vals=(loss_seg,loss_vertex,precision,recall)
         for rec,val in zip(recs,vals): rec.update(val)
 
         optimizer.zero_grad()
-        loss.backward()
+        loss.backward() 
         optimizer.step()
+            
+            # vertex_grad = torch.zeros(image.shape[0],18,image.shape[2],image.shape[3])
+            # vertex_grad[:,0:18,:,:] = vertex_pred
+            # vertex_grad[:,18:20,:,:] = seg_pred
 
+            # vertexLocal = vertexLocal - 0.5*vertex_pred.cpu() # update eta hat
+        ##
+        
         batch_time.update(time.time()-end)
         end=time.time()
 
@@ -171,6 +201,14 @@ def train(net, optimizer, dataloader, epoch):
             nrow = 5 if batch_size > 5 else batch_size
             recorder.rec_segmentation(F.softmax(seg_pred, dim=1), num_classes=2, nrow=nrow, step=step, name='train/image/seg')
             recorder.rec_vertex(vertex_pred, vertex_weights, nrow=4, step=step, name='train/image/ver')
+    
+        loss_scalar = loss.detach().cpu().numpy()
+        loss_vertex_scalar = loss_vertex.detach().cpu().numpy()
+        loss_seg_scalar = loss_seg.detach().cpu().numpy()
+        writer.add_scalar('Training loss',loss_scalar, epoch)
+        writer.add_scalar('Vertex loss',loss_vertex_scalar, epoch)
+        writer.add_scalar('Seg loss', loss_seg_scalar, epoch)
+
 
     print('epoch {} training cost {} s'.format(epoch,time.time()-train_begin))
 
@@ -188,9 +226,22 @@ def val(net, dataloader, epoch, val_prefix='val', use_camera_intrinsic=False, us
             image, mask, vertex, vertex_weights, pose, corner_target, Ks = [d.cuda() for d in data]
         else:
             image, mask, vertex, vertex_weights, pose, corner_target = [d.cuda() for d in data]
-
+        pose=pose.cpu().numpy()
         with torch.no_grad():
-            seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights)
+            # vertexEst = torch.zeros(image.shape[0],18,image.shape[2],image.shape[3])
+            # vertexEst[:,18:20,:,:] = torch.ones(image.shape[0],2,image.shape[2],image.shape[3]) # initial mask hat        
+            keypointEstInit = np.array([mask.shape[1]/2, mask.shape[2]/2, 1])  
+            vertexEstInit = torch.tensor(np.zeros((mask.shape[0],18,mask.shape[1],mask.shape[2]),dtype=np.float) )
+            hcoordsEstInit = np.zeros((9,3),dtype=np.float)        
+            hcoordsEstInit[:,:] = keypointEstInit
+            maskInit = np.ones((mask.shape[1],mask.shape[2]))
+            vertexEst = ld.compute_vertex_hcoords(maskInit,hcoordsEstInit) # initial eta hat 
+            vertexEst = torch.tensor(vertexEst, dtype= torch.float).permute(2, 0, 1)
+            vertexEstInit[:,:,:,:] = vertexEst
+            vertexEstLocal = vertexEstInit.float()
+            # for iter in range(5):
+
+            seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights, vertexEstLocal)
 
             loss_seg, loss_vertex, precision, recall=[torch.mean(val) for val in (loss_seg, loss_vertex, precision, recall)]
 
@@ -202,8 +253,7 @@ def val(net, dataloader, epoch, val_prefix='val', use_camera_intrinsic=False, us
                     mean=mean.cpu().numpy()
                     cov_inv=cov_inv.cpu().numpy()
                 else:
-                    corner_pred=eval_net(seg_pred,vertex_pred).cpu().detach().numpy()
-                pose=pose.cpu().numpy()
+                    corner_pred=eval_net(seg_pred,vertex_pred).cpu().detach().numpy()                    
 
                 b=pose.shape[0]
                 pose_preds=[]
@@ -212,10 +262,10 @@ def val(net, dataloader, epoch, val_prefix='val', use_camera_intrinsic=False, us
                     K=Ks[bi].cpu().numpy() if use_camera_intrinsic else None
                     if args.use_uncertainty_pnp:
                         pose_preds.append(evaluator.evaluate_uncertainty(mean[bi],cov_inv[bi],pose[bi],args.linemod_cls,
-                                                                         intri_type,vote_type,intri_matrix=K))
+                                                                        intri_type,vote_type,intri_matrix=K))
                     else:
                         pose_preds.append(evaluator.evaluate(corner_pred[bi],pose[bi],args.linemod_cls,intri_type,
-                                                             vote_type,intri_matrix=K))
+                                                            vote_type,intri_matrix=K))
 
 
                 if args.save_inter_result:
@@ -225,11 +275,17 @@ def val(net, dataloader, epoch, val_prefix='val', use_camera_intrinsic=False, us
                     imsave(os.path.join(args.save_inter_dir, '{}_mask_pr.png'.format(idx)), mask_pr[0])
                     imsave(os.path.join(args.save_inter_dir, '{}_mask_gt.png'.format(idx)), mask_gt[0])
                     imsave(os.path.join(args.save_inter_dir, '{}_rgb.png'.format(idx)),
-                           imagenet_to_uint8(image.cpu().detach().numpy()[0]))
+                        imagenet_to_uint8(image.cpu().detach().numpy()[0]))
                     save_pickle([pose_preds[0],pose[0]],os.path.join(args.save_inter_dir, '{}_pose.pkl'.format(idx)))
+
+            # vertex_grad = torch.zeros(image.shape[0],20,image.shape[2],image.shape[3])
+            # vertex_grad[:,0:18,:,:] = vertex_pred
+            # vertex_grad[:,18:20,:,:] = seg_pred
+            # vertexEstLocal = vertexEstLocal - 0.5*vertex_pred.cpu() # update eta hat
 
             vals=[loss_seg,loss_vertex,precision,recall]
             for rec,val in zip(recs,vals): rec.update(val)
+        print(idx)
 
     with torch.no_grad():
         batch_size = image.shape[0]
@@ -251,14 +307,18 @@ def val(net, dataloader, epoch, val_prefix='val', use_camera_intrinsic=False, us
     for rec in recs: rec.reset()
 
     print('epoch {} {} cost {} s'.format(epoch,val_prefix,time.time()-test_begin))
+    # evaluator.average_precision(verbose=True)
 
 def train_net():
-    net=Resnet18_8s(ver_dim=vote_num*2, seg_dim=2)
+    net=RefineNet(ver_dim=vote_num*2, seg_dim=2)
     net=NetWrapper(net)
     net=DataParallel(net).cuda()
+    tf_dir = '/home/zheyu/PVNET/pvnet/runs/' + train_cfg['exp_name']
+    writer = SummaryWriter(log_dir=tf_dir)
 
     optimizer = optim.Adam(net.parameters(), lr=train_cfg['lr'])
     model_dir=os.path.join(cfg.MODEL_DIR,train_cfg['model_name'])
+    print(model_dir)
     motion_model=train_cfg['motion_model']
     print('motion state {}'.format(motion_model))
 
@@ -338,13 +398,16 @@ def train_net():
             occ_val_loader = DataLoader(occ_val_set, batch_sampler=occ_val_batch_sampler, num_workers=12)
 
         for epoch in range(begin_epoch, train_cfg['epoch_num']):
+            tic = time.perf_counter()
             adjust_learning_rate(optimizer,epoch,train_cfg['lr_decay_rate'],train_cfg['lr_decay_epoch'])
-            train(net, optimizer, train_loader, epoch)
+            train(net, optimizer, train_loader, epoch, writer)
             val(net, val_loader, epoch,use_motion=motion_model)
             if args.linemod_cls in cfg.occ_linemod_cls_names:
                 val(net, occ_val_loader, epoch, 'occ_val',use_motion=motion_model)
             save_model(net.module.net, optimizer, epoch, model_dir)
-
+            toc = time.perf_counter()
+            print(toc-tic)
+            writer.add_scalar('Epoch time (s)',toc-tic, epoch)
 # def save_dataset(dataset,prefix=''):
 #     with open('assets/{}{}.txt'.format(prefix,args.linemod_cls),'w') as f:
 #         for data in dataset: f.write(data['rgb_pth']+'\n')
@@ -355,5 +418,6 @@ def train_net():
 #     np.save('assets/{}{}_gt.npy'.format(prefix,args.linemod_cls),np.asarray(poses_gt))
 
 if __name__ == "__main__":
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
     train_net()
     # save_poses_dataset('trun_')

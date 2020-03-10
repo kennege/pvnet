@@ -6,7 +6,7 @@ from transforms3d.euler import euler2mat
 from skimage.io import imsave
 
 
-def visualize_bounding_box(rgb, corners_pred, corners_targets=None, centers_pred=None, centers_targets=None, save=False, save_fn=None):
+def visualize_bounding_box(rgb, corners_pred, corners_targets=None, centers_pred=None, centers_targets=None, save=True, save_fn=None):
     '''
 
     :param rgb:             torch tensor with size [b,3,h,w] or numpy array with size [b,h,w,3]

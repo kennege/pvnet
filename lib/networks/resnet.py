@@ -145,9 +145,8 @@ class ResNet(nn.Module):
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
-        
-        self.avgpool = nn.AvgPool2d(7)
 
+        self.avgpool = nn.AvgPool2d(7)
         self.fc = nn.Linear(512 * block.expansion, num_classes)
         
         if self.fully_conv:
@@ -208,14 +207,15 @@ class ResNet(nn.Module):
         x16s = self.layer3(x8s)
         x32s = self.layer4(x16s)
         x=x32s
-        
         if not self.remove_avg_pool_layer:
             x = self.avgpool(x)
-        
+            
         if not self.fully_conv:
             x = x.view(x.size(0), -1)
-            
+        # print('X: ',x.size())
         xfc = self.fc(x)
+        # print('FC: ',self.fc)
+        # print('XFC: ',xfc.size())
 
         return x2s,x4s,x8s,x16s,x32s,xfc
 

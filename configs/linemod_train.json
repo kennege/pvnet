@@ -2,15 +2,18 @@
   "model_name":"linemod_train",
 
   "network":"resnet18_8s",
+  
+  "exp_name":"testing",
+
 
   "lr":1e-3,
   "lr_decay_rate":0.5,
   "lr_decay_epoch":20,
-  "train_batch_size":32,
-  "test_batch_size":1,
+  "train_batch_size":8,
+  "test_batch_size":8,
   "motion_model":false,
 
-  "resume":true,
+  "resume":false,
   "finetune":false,
   "epoch_num":200,
 
@@ -66,9 +69,9 @@
     "hue":0.05,
 
     "wmax":640,
-    "wmin":256,
+    "wmin":128,
     "hmax":480,
-    "hmin":256,
+    "hmin":128,
     "size_int":8,
 
     "ignore_fuse_ms_vertex":false,

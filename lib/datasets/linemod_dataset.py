@@ -220,7 +220,7 @@ class LineModDatasetRealAug(Dataset):
 
         if self.augment:
             rgb, mask, hcoords = self.augmentation(rgb, mask, hcoords, height, width)
-
+        
         ver = compute_vertex_hcoords(mask, hcoords, self.use_motion)
         ver=torch.tensor(ver, dtype=torch.float32).permute(2, 0, 1)
         mask=torch.tensor(np.ascontiguousarray(mask),dtype=torch.int64)

@@ -66,6 +66,7 @@ def smooth_l1_loss(vertex_pred, vertex_targets, vertex_weights, sigma=1.0, norma
     vertex_diff = vertex_pred - vertex_targets
     diff = vertex_weights * vertex_diff
     abs_diff = torch.abs(diff)
+
     smoothL1_sign = (abs_diff < 1. / sigma_2).detach().float()
     in_loss = torch.pow(diff, 2) * (sigma_2 / 2.) * smoothL1_sign \
               + (abs_diff - (0.5 / sigma_2)) * (1. - smoothL1_sign)
@@ -331,7 +332,7 @@ def compute_precision_recall(scores,target,reduce=False):
     preds=torch.argmax(scores,1)
     preds=preds.float()
     target=target.float()
-
+    # print(preds.shape)
     tp=preds*target
     fp=preds*(1-target)
     fn=(1-preds)*target
