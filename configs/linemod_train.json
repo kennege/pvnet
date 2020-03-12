@@ -3,17 +3,17 @@
 
   "network":"resnet18_8s",
   
-  "exp_name":"testing",
+  "exp_name":"original",
 
 
   "lr":1e-3,
-  "lr_decay_rate":0.5,
-  "lr_decay_epoch":20,
-  "train_batch_size":8,
-  "test_batch_size":8,
+  "lr_decay_rate":0.85,
+  "lr_decay_epoch":5,
+  "train_batch_size":10,
+  "test_batch_size":1,
   "motion_model":false,
 
-  "resume":false,
+  "resume":true,
   "finetune":false,
   "epoch_num":200,
 

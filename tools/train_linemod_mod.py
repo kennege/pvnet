@@ -253,7 +253,7 @@ def val(net, dataloader, epoch, val_prefix='val', use_camera_intrinsic=False, us
     print('epoch {} {} cost {} s'.format(epoch,val_prefix,time.time()-test_begin))
 
 def train_net():
-    net=Resnet18_8s(ver_dim=vote_num*2, seg_dim=2)
+    net=RefineNet(ver_dim=vote_num*2, seg_dim=2)
     net=NetWrapper(net)
     net=DataParallel(net).cuda()
 
