@@ -82,8 +82,9 @@ class NetWrapper(nn.Module):
         self.net=net
         self.criterion=nn.CrossEntropyLoss(reduce=False)
 
-    def forward(self, image, mask, vertex, vertex_weights):
-        seg_pred, vertex_pred = self.net(image)
+    def forward(self, image, mask, vertex, vertex_weights):       
+        vertexEst = torch.tensor(np.zeros((image.shape[0], 18, image.shape[2], image.shape[3]))).float().cuda()
+        seg_pred, vertex_pred = self.net(image, vertexEst)
         loss_seg = self.criterion(seg_pred, mask)
         loss_seg = torch.mean(loss_seg.view(loss_seg.shape[0],-1),1)
         loss_vertex = smooth_l1_loss(vertex_pred, vertex, vertex_weights, reduce=False)
@@ -142,7 +143,6 @@ def train(net, optimizer, dataloader, epoch):
     for idx, data in enumerate(dataloader):
         image, mask, vertex, vertex_weights, pose, _ = [d.cuda() for d in data]
         data_time.update(time.time()-end)
-
         seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights)
         loss_seg, loss_vertex, precision, recall=[torch.mean(val) for val in (loss_seg, loss_vertex, precision, recall)]
         loss = loss_seg + loss_vertex * train_cfg['vertex_loss_ratio']
@@ -253,7 +253,7 @@ def val(net, dataloader, epoch, val_prefix='val', use_camera_intrinsic=False, us
     print('epoch {} {} cost {} s'.format(epoch,val_prefix,time.time()-test_begin))
 
 def train_net():
-    net=Resnet18_8s(ver_dim=vote_num*2, seg_dim=2)
+    net=RefineNet(ver_dim=vote_num*2, seg_dim=2)
     net=NetWrapper(net)
     net=DataParallel(net).cuda()
 
