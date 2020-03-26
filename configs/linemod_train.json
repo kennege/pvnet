@@ -9,7 +9,7 @@
   "lr":1e-3,
   "lr_decay_rate":0.85,
   "lr_decay_epoch":5,
-  "train_batch_size":28,
+  "train_batch_size":16,
   "test_batch_size":1,
   "motion_model":false,
 

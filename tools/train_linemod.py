@@ -2,7 +2,6 @@ import sys
 
 from skimage.io import imsave
 
-
 sys.path.append('.')
 sys.path.append('..')
 from lib.ransac_voting_gpu_layer.ransac_voting_gpu import ransac_voting_layer_v3, \
@@ -30,6 +29,8 @@ import time
 from collections import OrderedDict
 import random
 import numpy as np
+
+import lib.datasets.linemod_dataset as ld
 
 with open(args.cfg_file,'r') as f:
     train_cfg=json.load(f)
@@ -82,13 +83,20 @@ class NetWrapper(nn.Module):
         self.net=net
         self.criterion=nn.CrossEntropyLoss(reduce=False)
 
-    def forward(self, image, mask, vertex, vertex_weights):       
-        vertexEst = torch.tensor(np.zeros((image.shape[0], 18, image.shape[2], image.shape[3]))).float().cuda()
-        seg_pred, vertex_pred = self.net(image, vertexEst)
+    def forward(self, image, mask, vertex, vertex_weights, vertex_init):       
+        # keypointGT = np.array([[np.random.uniform(0,imageDim[0]), np.random.uniform(0,imageDim[1])]])
+        # vertexEst = ld.compute_vertex(mask, keypointGT)
+        # seg_init, vertex_init = self.initNet(image)
+        # vertexEst = torch.tensor(np.zeros((image.shape[0], 18, image.shape[2], image.shape[3]))).float().cuda()
+        # for iter in range(5):
+        seg_pred, vertex_pred = self.net(image, vertex_init)
+        
         loss_seg = self.criterion(seg_pred, mask)
         loss_seg = torch.mean(loss_seg.view(loss_seg.shape[0],-1),1)
         loss_vertex = smooth_l1_loss(vertex_pred, vertex, vertex_weights, reduce=False)
         precision, recall = compute_precision_recall(seg_pred, mask)
+
+            # vertexEst = vertexEst - 0.2*vertex_pred
         return seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall
 
 
@@ -130,7 +138,7 @@ class UncertaintyEvalWrapper(nn.Module):
         mean, var=estimate_voting_distribution_with_mean(mask,vertex_pred,mean)
         return mean, var
 
-def train(net, optimizer, dataloader, epoch):
+def train(net, PVNet, optimizer, dataloader, epoch):
     for rec in recs: rec.reset()
     data_time.reset()
     batch_time.reset()
@@ -143,8 +151,9 @@ def train(net, optimizer, dataloader, epoch):
     for idx, data in enumerate(dataloader):
         image, mask, vertex, vertex_weights, pose, _ = [d.cuda() for d in data]
         data_time.update(time.time()-end)
-        seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights)
-        loss_seg, loss_vertex, precision, recall=[torch.mean(val) for val in (loss_seg, loss_vertex, precision, recall)]
+        _, vertex_init = PVNet(image)
+        seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init)
+        loss_seg, loss_vertex, precision,recall=[torch.mean(val) for val in (loss_seg, loss_vertex, precision, recall)]
         loss = loss_seg + loss_vertex * train_cfg['vertex_loss_ratio']
         vals=(loss_seg,loss_vertex,precision,recall)
         for rec,val in zip(recs,vals): rec.update(val)
@@ -174,7 +183,7 @@ def train(net, optimizer, dataloader, epoch):
 
     print('epoch {} training cost {} s'.format(epoch,time.time()-train_begin))
 
-def val(net, dataloader, epoch, val_prefix='val', use_camera_intrinsic=False, use_motion=False):
+def val(net, PVNet, dataloader, epoch, val_prefix='val', use_camera_intrinsic=False, use_motion=False):
     for rec in recs: rec.reset()
 
     test_begin = time.time()
@@ -190,7 +199,8 @@ def val(net, dataloader, epoch, val_prefix='val', use_camera_intrinsic=False, us
             image, mask, vertex, vertex_weights, pose, corner_target = [d.cuda() for d in data]
 
         with torch.no_grad():
-            seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights)
+            _, vertex_init = PVNet(image)
+            seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init)
 
             loss_seg, loss_vertex, precision, recall=[torch.mean(val) for val in (loss_seg, loss_vertex, precision, recall)]
 
@@ -257,6 +267,12 @@ def train_net():
     net=NetWrapper(net)
     net=DataParallel(net).cuda()
 
+    PVModelDir='/home/gerard/pvnet/data/model/cat_linemod_train_orig/199.pth'
+    PVNet=Resnet18_8s_Orig(ver_dim=vote_num*2, seg_dim=2)
+    PVNet.load_state_dict(torch.load(PVModelDir)['net'])
+    PVNet = DataParallel(PVNet).cuda()
+    PVNet.eval()
+
     optimizer = optim.Adam(net.parameters(), lr=train_cfg['lr'])
     model_dir=os.path.join(cfg.MODEL_DIR,train_cfg['model_name'])
     motion_model=train_cfg['motion_model']
@@ -275,7 +291,7 @@ def train_net():
             test_batch_sampler = ImageSizeBatchSampler(test_sampler, train_cfg['test_batch_size'], False)
             test_loader = DataLoader(test_set, batch_sampler=test_batch_sampler, num_workers=0)
             prefix='test' if args.use_test_set else 'val'
-            val(net, test_loader, begin_epoch, prefix, use_motion=motion_model)
+            val(net, PVNet, test_loader, begin_epoch, prefix, use_motion=motion_model)
 
         if args.occluded and args.linemod_cls in cfg.occ_linemod_cls_names:
             print('testing occluded linemod ...')
@@ -287,7 +303,7 @@ def train_net():
             occ_test_batch_sampler = ImageSizeBatchSampler(occ_test_sampler, train_cfg['test_batch_size'], False)
             occ_test_loader = DataLoader(occ_test_set, batch_sampler=occ_test_batch_sampler, num_workers=0)
             prefix='occ_test' if args.use_test_set else 'occ_val'
-            val(net, occ_test_loader, begin_epoch, prefix, use_motion=motion_model)
+            val(net, PVNet, occ_test_loader, begin_epoch, prefix, use_motion=motion_model)
 
         if args.truncated:
             print('testing truncated linemod ...')
@@ -299,7 +315,7 @@ def train_net():
             trun_test_batch_sampler = ImageSizeBatchSampler(trun_test_sampler, train_cfg['test_batch_size'], False)
             trun_test_loader = DataLoader(trun_image_set, batch_sampler=trun_test_batch_sampler, num_workers=0)
             prefix='trun_test'
-            val(net, trun_test_loader, begin_epoch, prefix, True, use_motion=motion_model)
+            val(net, PVNet, trun_test_loader, begin_epoch, prefix, True, use_motion=motion_model)
 
     else:
         begin_epoch=0
@@ -339,10 +355,10 @@ def train_net():
 
         for epoch in range(begin_epoch, train_cfg['epoch_num']):
             adjust_learning_rate(optimizer,epoch,train_cfg['lr_decay_rate'],train_cfg['lr_decay_epoch'])
-            train(net, optimizer, train_loader, epoch)
-            val(net, val_loader, epoch,use_motion=motion_model)
+            train(net, PVNet, optimizer, train_loader, epoch)
+            val(net, PVNet, val_loader, epoch,use_motion=motion_model)
             if args.linemod_cls in cfg.occ_linemod_cls_names:
-                val(net, occ_val_loader, epoch, 'occ_val',use_motion=motion_model)
+                val(net, PVNet, occ_val_loader, epoch, 'occ_val',use_motion=motion_model)
             save_model(net.module.net, optimizer, epoch, model_dir)
 
 # def save_dataset(dataset,prefix=''):
