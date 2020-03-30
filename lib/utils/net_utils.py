@@ -101,7 +101,7 @@ def load_model(model, optim, model_dir, epoch=-1):
         pth = max(pths)
     else:
         pth = epoch
-    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(111)))
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
     model.load_state_dict(pretrained_model['net'])
     optim.load_state_dict(pretrained_model['optim'])
     print('load model {} epoch {}'.format(model_dir,pretrained_model['epoch']))

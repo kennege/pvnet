@@ -511,8 +511,10 @@ def b_inv(b_mat):
     # for i in range(b_mat.shape[0]):
     #     if sum(sum(b_mat[i]))==0:
     #         b_mat[i] = 0.001 * torch.eye(2)
-
-    b_inv, _ = torch.gesv(eye, b_mat)
+    try:
+        b_inv, _ = torch.gesv(eye, b_mat)
+    except:
+        b_inv = eye
     return b_inv
 
 def ransac_voting_layer_v3(mask, vertex, round_hyp_num, inlier_thresh=0.999, confidence=0.99, max_iter=20,

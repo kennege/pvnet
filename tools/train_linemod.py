@@ -284,7 +284,7 @@ def train_net():
     PVModelDir='/home/gerard/pvnet/data/model/cat_linemod_train/199.pth'
     PVNet=Resnet18_8s_Orig(ver_dim=vote_num*2, seg_dim=2)
     PVNet.load_state_dict(torch.load(PVModelDir)['net'])
-    PVNet = DataParallel(PVNet).cuda()
+    PVNet=DataParallel(PVNet).cuda()
     PVNet.eval()
 
     optimizer = optim.Adam(net.parameters(), lr=train_cfg['lr'])
