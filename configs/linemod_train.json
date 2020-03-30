@@ -3,13 +3,13 @@
 
   "network":"resnet18_8s",
   
-  "exp_name":"original",
+  "exp_name":"200330",
 
 
   "lr":1e-3,
   "lr_decay_rate":0.85,
-  "lr_decay_epoch":5,
-  "train_batch_size":16,
+  "lr_decay_epoch":20,
+  "train_batch_size":24,
   "test_batch_size":1,
   "motion_model":false,
 
@@ -30,9 +30,9 @@
   "loss_rec_step":80,
   "img_rec_step":160,
 
-  "eval_epoch":false,
-  "eval_inter":5,
-  "eval_epoch_begin":80,
+  "eval_epoch":true,
+  "eval_inter":1,
+  "eval_epoch_begin":1,
 
   "vote_type":"Farthest",
 

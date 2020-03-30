@@ -1,6 +1,8 @@
 import sys
 
 from skimage.io import imsave
+from torch.utils.tensorboard import SummaryWriter
+
 
 sys.path.append('.')
 sys.path.append('..')
@@ -151,8 +153,9 @@ def train(net, PVNet, optimizer, dataloader, epoch):
     for idx, data in enumerate(dataloader):
         image, mask, vertex, vertex_weights, pose, _ = [d.cuda() for d in data]
         data_time.update(time.time()-end)
-        _, vertex_init = PVNet(image)
-        seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init)
+        with torch.no_grad():
+            seg_init, vertex_init = PVNet(image)
+        seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
         loss_seg, loss_vertex, precision,recall=[torch.mean(val) for val in (loss_seg, loss_vertex, precision, recall)]
         loss = loss_seg + loss_vertex * train_cfg['vertex_loss_ratio']
         vals=(loss_seg,loss_vertex,precision,recall)
@@ -183,7 +186,7 @@ def train(net, PVNet, optimizer, dataloader, epoch):
 
     print('epoch {} training cost {} s'.format(epoch,time.time()-train_begin))
 
-def val(net, PVNet, dataloader, epoch, val_prefix='val', use_camera_intrinsic=False, use_motion=False):
+def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_intrinsic=False, use_motion=False):
     for rec in recs: rec.reset()
 
     test_begin = time.time()
@@ -211,7 +214,7 @@ def val(net, PVNet, dataloader, epoch, val_prefix='val', use_camera_intrinsic=Fa
                     mean,cov_inv=uncertain_eval_net(seg_pred,vertex_pred)
                     mean=mean.cpu().numpy()
                     cov_inv=cov_inv.cpu().numpy()
-                else:
+                else: 
                     corner_pred=eval_net(seg_pred,vertex_pred).cpu().detach().numpy()
                 pose=pose.cpu().numpy()
 
@@ -226,7 +229,6 @@ def val(net, PVNet, dataloader, epoch, val_prefix='val', use_camera_intrinsic=Fa
                     else:
                         pose_preds.append(evaluator.evaluate(corner_pred[bi],pose[bi],args.linemod_cls,intri_type,
                                                              vote_type,intri_matrix=K))
-
 
                 if args.save_inter_result:
                     mask_pr = torch.argmax(seg_pred, 1).cpu().detach().numpy()
@@ -247,27 +249,39 @@ def val(net, PVNet, dataloader, epoch, val_prefix='val', use_camera_intrinsic=Fa
         recorder.rec_segmentation(F.softmax(seg_pred, dim=1), num_classes=2, nrow=nrow,
                                   step=epoch, name='{}/image/seg'.format(val_prefix))
         recorder.rec_vertex(vertex_pred, vertex_weights, nrow=4, step=epoch, name='{}/image/ver'.format(val_prefix))
-
+    
     losses_batch=OrderedDict()
     for name, rec in zip(recs_names, recs): losses_batch['{}/'.format(val_prefix) + name] = rec.avg
     if (train_cfg['eval_epoch']
         and epoch%train_cfg['eval_inter']==0
-        and epoch>=train_cfg['eval_epoch_begin']) or args.test_model:
+        and epoch>=train_cfg['eval_epoch_begin']
+        and val_prefix == 'val') or args.test_model:
         proj_err,add,cm=evaluator.average_precision(False)
         losses_batch['{}/scalar/projection_error'.format(val_prefix)]=proj_err
         losses_batch['{}/scalar/add'.format(val_prefix)]=add
         losses_batch['{}/scalar/cm'.format(val_prefix)]=cm
-    recorder.rec_loss_batch(losses_batch, epoch, epoch, val_prefix)
+        recorder.rec_loss_batch(losses_batch, epoch, epoch, val_prefix)
+        writer.add_scalar('projection error', proj_err, epoch)
+        writer.add_scalar('add',add,epoch)
+        writer.add_scalar('vertex loss',loss_vertex, epoch)
+        writer.add_scalar('seg loss', loss_seg, epoch)
+        writer.add_scalar('learning rate', lr, epoch)
+
     for rec in recs: rec.reset()
+
+
 
     print('epoch {} {} cost {} s'.format(epoch,val_prefix,time.time()-test_begin))
 
 def train_net():
+    tf_dir = './runs/' + train_cfg['exp_name']
+    writer = SummaryWriter(log_dir=tf_dir)
+
     net=RefineNet(ver_dim=vote_num*2, seg_dim=2)
     net=NetWrapper(net)
     net=DataParallel(net).cuda()
 
-    PVModelDir='/home/gerard/pvnet/data/model/cat_linemod_train_orig/199.pth'
+    PVModelDir='/home/gerard/pvnet/data/model/cat_linemod_train/199.pth'
     PVNet=Resnet18_8s_Orig(ver_dim=vote_num*2, seg_dim=2)
     PVNet.load_state_dict(torch.load(PVModelDir)['net'])
     PVNet = DataParallel(PVNet).cuda()
@@ -280,9 +294,10 @@ def train_net():
 
     if args.test_model:
         begin_epoch=load_model(net.module.net, optimizer, model_dir, args.load_epoch)
-
+        for param_group in optimizer.param_groups:
+            lr = param_group['lr']
         if args.normal:
-            print('testing normal linemod ...')
+            print('testing normal linemod ...') 
             image_db = LineModImageDB(args.linemod_cls,has_render_set=False,
                                       has_fuse_set=False)
             test_db = image_db.test_real_set+image_db.val_real_set
@@ -291,7 +306,8 @@ def train_net():
             test_batch_sampler = ImageSizeBatchSampler(test_sampler, train_cfg['test_batch_size'], False)
             test_loader = DataLoader(test_set, batch_sampler=test_batch_sampler, num_workers=0)
             prefix='test' if args.use_test_set else 'val'
-            val(net, PVNet, test_loader, begin_epoch, prefix, use_motion=motion_model)
+            
+            val(net, PVNet, test_loader, begin_epoch, lr, writer, prefix, use_motion=motion_model)
 
         if args.occluded and args.linemod_cls in cfg.occ_linemod_cls_names:
             print('testing occluded linemod ...')
@@ -303,7 +319,7 @@ def train_net():
             occ_test_batch_sampler = ImageSizeBatchSampler(occ_test_sampler, train_cfg['test_batch_size'], False)
             occ_test_loader = DataLoader(occ_test_set, batch_sampler=occ_test_batch_sampler, num_workers=0)
             prefix='occ_test' if args.use_test_set else 'occ_val'
-            val(net, PVNet, occ_test_loader, begin_epoch, prefix, use_motion=motion_model)
+            val(net, PVNet, occ_test_loader, begin_epoch, lr, writer, prefix, use_motion=motion_model)
 
         if args.truncated:
             print('testing truncated linemod ...')
@@ -315,13 +331,17 @@ def train_net():
             trun_test_batch_sampler = ImageSizeBatchSampler(trun_test_sampler, train_cfg['test_batch_size'], False)
             trun_test_loader = DataLoader(trun_image_set, batch_sampler=trun_test_batch_sampler, num_workers=0)
             prefix='trun_test'
-            val(net, PVNet, trun_test_loader, begin_epoch, prefix, True, use_motion=motion_model)
+            val(net, PVNet, trun_test_loader, begin_epoch, lr, writer, prefix, True, use_motion=motion_model)
 
     else:
         begin_epoch=0
         if train_cfg['resume']:
             begin_epoch=load_model(net.module.net, optimizer, model_dir)
 
+            # reset learning rate
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = train_cfg['lr']
+                lr = param_group['lr']
 
         image_db = LineModImageDB(args.linemod_cls,
                                   has_fuse_set=train_cfg['use_fuse'],
@@ -339,7 +359,7 @@ def train_net():
         train_batch_sampler = ImageSizeBatchSampler(train_sampler, train_cfg['train_batch_size'], False, cfg=train_cfg['aug_cfg'])
         train_loader = DataLoader(train_set, batch_sampler=train_batch_sampler, num_workers=12)
 
-        val_db=image_db.val_real_set
+        val_db=image_db.test_real_set+image_db.val_real_set # test on the full test set
         val_set = LineModDatasetRealAug(val_db, cfg.LINEMOD, vote_type, augment=False, cfg=train_cfg['aug_cfg'], use_motion=motion_model)
         val_sampler = SequentialSampler(val_set)
         val_batch_sampler = ImageSizeBatchSampler(val_sampler, train_cfg['test_batch_size'], False, cfg=train_cfg['aug_cfg'])
@@ -356,9 +376,10 @@ def train_net():
         for epoch in range(begin_epoch, train_cfg['epoch_num']):
             adjust_learning_rate(optimizer,epoch,train_cfg['lr_decay_rate'],train_cfg['lr_decay_epoch'])
             train(net, PVNet, optimizer, train_loader, epoch)
-            val(net, PVNet, val_loader, epoch,use_motion=motion_model)
+            val(net, PVNet, val_loader, epoch, lr, writer, use_motion=motion_model)
             if args.linemod_cls in cfg.occ_linemod_cls_names:
-                val(net, PVNet, occ_val_loader, epoch, 'occ_val',use_motion=motion_model)
+                val(net, PVNet, occ_val_loader, epoch, lr, writer, 'occ_val',use_motion=motion_model)
+
             save_model(net.module.net, optimizer, epoch, model_dir)
 
 # def save_dataset(dataset,prefix=''):

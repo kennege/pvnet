@@ -101,7 +101,7 @@ def load_model(model, optim, model_dir, epoch=-1):
         pth = max(pths)
     else:
         pth = epoch
-    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(195)))
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(111)))
     model.load_state_dict(pretrained_model['net'])
     optim.load_state_dict(pretrained_model['optim'])
     print('load model {} epoch {}'.format(model_dir,pretrained_model['epoch']))
@@ -272,6 +272,10 @@ class MultiClassPrecisionRecall:
 
 
 def adjust_learning_rate(optimizer, epoch, lr_decay_rate, lr_decay_epoch, min_lr=1e-5):
+    for param_group in optimizer.param_groups:
+            if param_group['lr'] < min_lr:
+                param_group['lr'] = min_lr
+    
     if ((epoch+1) % lr_decay_epoch)!=0:
         return
 
