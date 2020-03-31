@@ -62,7 +62,6 @@ class Resnet18_8s_Orig(nn.Module):
 
     def forward(self, x, feature_alignment=False):
         x2s, x4s, x8s, x16s, x32s, xfc = self.resnet18_8s(x)
-
         fm=self.conv8s(torch.cat([xfc,x8s],1))
         fm=self.up8sto4s(fm)
 

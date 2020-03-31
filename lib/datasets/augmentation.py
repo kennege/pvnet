@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import math
+import torch
 
 def resize_keep_aspect_ratio(img, imsize, intp_type=cv2.INTER_LINEAR):
     h,w=img.shape[0],img.shape[1]
@@ -115,7 +116,7 @@ def crop_or_padding(img, mask, hcoords, hratio, wratio):
 
     return out_img,out_mask,hcoords,
 
-def crop_or_padding_to_fixed_size_instance(img, mask, hcoords, th, tw, overlap_ratio=0.5):
+def crop_or_padding_to_fixed_size_instance(img, mask, vertex_init, hcoords, th, tw, overlap_ratio=0.5):
     h,w,_=img.shape
     hs,ws=np.nonzero(mask)
 
@@ -136,6 +137,7 @@ def crop_or_padding_to_fixed_size_instance(img, mask, hcoords, th, tw, overlap_r
 
     img=img[hbeg:hend, wbeg:wend]
     mask=mask[hbeg:hend, wbeg:wend]
+    vertex_init = vertex_init[:,hbeg:hend, wbeg:wend]
 
     hcoords[:, 0]-=wbeg*hcoords[:, 2]
     hcoords[:, 1]-=hbeg*hcoords[:, 2]
@@ -155,7 +157,7 @@ def crop_or_padding_to_fixed_size_instance(img, mask, hcoords, th, tw, overlap_r
 
         img, mask = new_img, new_mask
 
-    return img, mask, hcoords
+    return img, mask, vertex_init, hcoords
 
 def crop_or_padding_to_fixed_size(img, mask, th, tw):
     h,w,_=img.shape
@@ -247,14 +249,18 @@ def compute_resize_range(mask,hmin,hmax,wmin,wmax):
     return rmin, rmax
 
 #### higher level api #####
-def crop_resize_instance_v1(img, mask, hcoords, imheight, imwidth,
+def crop_resize_instance_v1(img, mask, vertex_init, hcoords, imheight, imwidth,
                             overlap_ratio=0.5, ratio_min=0.8, ratio_max=1.2):
     '''
 
     crop a region with [imheight*resize_ratio,imwidth*resize_ratio]
     which at least overlap with foreground bbox with overlap
     :param img:
-    :param mask:
+    :param mask:    img = cv2.resize(img, (int(math.ceil(imwidth/2)), int(math.ceil(imheight/2))), interpolation=cv2.INTER_LINEAR)
+    mask = cv2.resize(mask, (int(math.ceil(imwidth/2)), int(math.ceil(imheight/2))), interpolation=cv2.INTER_NEAREST)
+
+    hcoords[:, 0] = hcoords[:, 0] / resize_ratio
+    hcoords[:, 1] = hcoords[:, 1] / resize_ratio
     :param hcoords:
     :param imheight:
     :param imwidth:
@@ -267,41 +273,21 @@ def crop_resize_instance_v1(img, mask, hcoords, imheight, imwidth,
     target_height=int(imheight*resize_ratio)
     target_width=int(imwidth*resize_ratio)
 
-    # # reduce image size by half centered around object
-    # h,w,_=img.shape
-    # hs,ws=np.nonzero(mask)
-
-    # hmin,hmax=np.min(hs),np.max(hs)
-    # wmin,wmax=np.min(ws),np.max(ws)
-    # hcenter = (hmin+hmax)/2
-    # wcenter = (wmin+wmax)/2
-    # hbeg = max(int(hcenter - (h/4)),0)
-    # hend = min(int(hcenter + (h/4)),h)
-    # wbeg = max(int(wcenter - (w/4)),0)
-    # wend = min(int(wcenter + (w/4)),w)
-    # # print('img: ',img.shape)
-    # # print('hcoords: ',hcoords.shape)
-    # img=img[hbeg:hend, wbeg:wend]
-    # mask=mask[hbeg:hend, wbeg:wend]
-    # hcoords[:, 0]-=wbeg*hcoords[:, 2]
-    # hcoords[:, 1]-=hbeg*hcoords[:, 2]
-    # # print('img: ',img.shape)
-    # # print('hcoords: ',hcoords.shape)
-
-
-    img, mask, hcoords = crop_or_padding_to_fixed_size_instance(
-        img, mask, hcoords, target_height, target_width, overlap_ratio)
-   
+    img, mask, vertex_init, hcoords = crop_or_padding_to_fixed_size_instance(
+        img, mask, vertex_init, hcoords, target_height, target_width, overlap_ratio)
+    
     img = cv2.resize(img, (imwidth, imheight), interpolation=cv2.INTER_LINEAR)
     mask = cv2.resize(mask, (imwidth, imheight), interpolation=cv2.INTER_NEAREST)
-    
-    # print(mask.shape)
+
+    vertex_init = vertex_init.permute(1,2,0)
+    vertex_init = vertex_init.numpy()
+    vertex_init = cv2.resize(vertex_init, (imwidth, imheight), interpolation=cv2.INTER_LINEAR)
+    vertex_init = torch.from_numpy(vertex_init).permute(2,0,1)
 
     hcoords[:, 0] = hcoords[:, 0] / resize_ratio
     hcoords[:, 1] = hcoords[:, 1] / resize_ratio
-    # print(hcoords.shape)
 
-    return img, mask, hcoords
+    return img, mask, vertex_init, hcoords
 
 def crop_resize_instance_v2(img, mask, hcoords, imheight, imwidth,
                             overlap_ratio=0.5, hmin=30, hmax=135, wmin=30, wmax=130):

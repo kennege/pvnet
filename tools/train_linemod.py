@@ -151,10 +151,12 @@ def train(net, PVNet, optimizer, dataloader, epoch):
     size = len(dataloader)
     end=time.time()
     for idx, data in enumerate(dataloader):
-        image, mask, vertex, vertex_weights, pose, _ = [d.cuda() for d in data]
+        image, mask, vertex, vertex_weights, pose, _, vertex_init = [d.cuda() for d in data]
         data_time.update(time.time()-end)
-        with torch.no_grad():
-            seg_init, vertex_init = PVNet(image)
+        # with torch.no_grad():
+            # print(vertex_init.shape)
+            # _, vertex_init = PVNet(image)
+            # print(vertex_init.shape)
         seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
         loss_seg, loss_vertex, precision,recall=[torch.mean(val) for val in (loss_seg, loss_vertex, precision, recall)]
         loss = loss_seg + loss_vertex * train_cfg['vertex_loss_ratio']
@@ -199,11 +201,11 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
         if use_camera_intrinsic:
             image, mask, vertex, vertex_weights, pose, corner_target, Ks = [d.cuda() for d in data]
         else:
-            image, mask, vertex, vertex_weights, pose, corner_target = [d.cuda() for d in data]
+            image, mask, vertex, vertex_weights, pose, corner_target, vertex_init = [d.cuda() for d in data]
 
         with torch.no_grad():
-            _, vertex_init = PVNet(image)
-            seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init)
+            # _, vertex_init = PVNet(image)
+            seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
 
             loss_seg, loss_vertex, precision, recall=[torch.mean(val) for val in (loss_seg, loss_vertex, precision, recall)]
 

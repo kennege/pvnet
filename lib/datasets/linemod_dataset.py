@@ -1,6 +1,7 @@
 import random
 import sys
 import time
+import math
 
 sys.path.append('.')
 
@@ -200,8 +201,18 @@ class LineModDatasetRealAug(Dataset):
     def __getitem__(self, index_tuple):
         index, height, width = index_tuple
 
+        # crop the input image by half, ensuring divisible by 8 - 31/03/2020
+        height = int(round(height/16)*8)
+        width = int(round(width/16)*8)
+
         rgb_path = os.path.join(self.data_prefix,self.imagedb[index]['rgb_pth'])
         mask_path = os.path.join(self.data_prefix,self.imagedb[index]['dpt_pth'])
+
+        path = self.imagedb[index]['rgb_pth']
+        path = path.replace("/","_") # 31/03/20
+        path = path.replace(".jpg","") # 31/03/20 
+        fname = '/home/gerard/vertex_init/{}.npy'.format(path) # 31/03/20
+        vertex_init = torch.squeeze(torch.from_numpy(np.load(fname)),0)
 
         pose = self.imagedb[index]['RT'].copy()
         rgb = read_rgb_np(rgb_path)
@@ -219,8 +230,8 @@ class LineModDatasetRealAug(Dataset):
             K = torch.tensor(self.imagedb[index]['K'].astype(np.float32))
 
         if self.augment:
-            rgb, mask, hcoords = self.augmentation(rgb, mask, hcoords, height, width)
-        
+            rgb, mask, vertex_init, hcoords = self.augmentation(rgb, mask, vertex_init, hcoords, height, width)
+
         ver = compute_vertex_hcoords(mask, hcoords, self.use_motion)
         ver=torch.tensor(ver, dtype=torch.float32).permute(2, 0, 1)
         mask=torch.tensor(np.ascontiguousarray(mask),dtype=torch.int64)
@@ -246,12 +257,13 @@ class LineModDatasetRealAug(Dataset):
         if self.use_intrinsic:
             return rgb, mask, ver, ver_weight, pose, hcoords, K
         else:
-            return rgb, mask, ver, ver_weight, pose, hcoords
+            return rgb, mask, ver, ver_weight, pose, hcoords, vertex_init
+
 
     def __len__(self):
         return len(self.imagedb)
 
-    def augmentation(self, img, mask, hcoords, height, width):
+    def augmentation(self, img, mask, vertex_init, hcoords, height, width):
         foreground=np.sum(mask)
         # randomly mask out to add occlusion
         if self.cfg['mask'] and np.random.random() < 0.5:
@@ -277,7 +289,7 @@ class LineModDatasetRealAug(Dataset):
                     #    overlap_ratio**2 of instance region.
                     # 2. if the region is larger than original image, then padding 0
                     # 3. then resize the cropped image to [height, width] (bilinear for image, nearest for mask)
-                    img, mask, hcoords = crop_resize_instance_v1(img, mask, hcoords, height, width, self.cfg['overlap_ratio'],
+                    img, mask, vertex_init, hcoords = crop_resize_instance_v1(img, mask, vertex_init, hcoords, height, width, self.cfg['overlap_ratio'],
                                                                  self.cfg['resize_ratio_min'], self.cfg['resize_ratio_max'])
         else:
             img, mask = crop_or_padding_to_fixed_size(img, mask, height, width)
@@ -287,7 +299,7 @@ class LineModDatasetRealAug(Dataset):
         if self.cfg['flip'] and np.random.random() < 0.5:
             img, mask, hcoords = flip(img, mask, hcoords)
 
-        return img, mask, hcoords
+        return img, mask, vertex_init, hcoords
 
 
 class ImageSizeBatchSampler(Sampler):
