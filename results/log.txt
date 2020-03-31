@@ -1,0 +1,32 @@
+original pvnet (batch size 32)
+val epoch 200 step 200 seg 0.00210304  ver 0.00177682  precision 0.95570904  recall 0.96242315  projection_error 0.99800399  add 0.78043912  cm 0.98602794  
+occ_val epoch 200 step 200 seg 0.00678862  ver 0.04505466  precision 0.90475786  recall 0.66305059  projection_error 0.59898905  add 0.18197136  cm 0.14153328
+
+pvnet with initial estimate of all zeros (batch size 28)
+val epoch 200 step 200 seg 0.00231823  ver 0.00216126  precision 0.95068997  recall 0.96104944  projection_error 0.99900200  add 0.72355289  cm 0.97105788 
+occ_val epoch 200 step 200 seg 0.00656066  ver 0.04266813  precision 0.90417069  recall 0.65867317  projection_error 0.56613311  add 0.17101938  cm 0.10699242
+val epoch 291 step 291 seg 0.00234124  ver 0.00214659  precision 0.95141464  recall 0.95946556  projection_error 0.99800399  add 0.77245509  cm 0.97205589 
+occ_val epoch 291 step 291 seg 0.00631656  ver 0.04067143  precision 0.89549237  recall 0.67064053  projection_error 0.57708509  add 0.18365628  cm 0.11794440 
+val epoch 296 step 296 seg 0.00229061  ver 0.00214978  precision 0.95147824  recall 0.96119279  projection_error 0.99800399  add 0.75548902  cm 0.96906188  
+occ_val epoch 296 step 296 seg 0.00636403  ver 0.03983452  precision 0.90136307  recall 0.66861385  projection_error 0.56529065  add 0.17944398  cm 0.12384162
+val epoch 300 step 300 seg 0.00224273  ver 0.00207669  precision 0.95117134  recall 0.96286994  projection_error 0.99800399  add 0.72055888  cm 0.97804391
+occ_val epoch 300 step 300 seg 0.00647538  ver 0.03987185  precision 0.90170580  recall 0.66313177  projection_error 0.58213985  add 0.16175232  cm 0.11710194 
+
+pvnet with inital estimate of original pvnet (batch size 16)
+val epoch 191 step 191 seg 0.00219094  ver 0.00173815  precision 0.95634967  recall 0.95925182  projection_error 0.99700599  add 0.69061876  cm 0.98203593
+occ_val epoch 191 step 191 seg 0.00783560  ver 0.04333216  precision 0.90350139  recall 0.68124640  projection_error 0.59646167  add 0.19460826  cm 0.15248526
+val epoch 196 step 196 seg 0.00219179  ver 0.00177322  precision 0.95568627  recall 0.95971084  projection_error 0.99700599  add 0.61876248  cm 0.98003992
+occ_val epoch 196 step 196 seg 0.00831708  ver 0.04311077  precision 0.90793234  recall 0.67139345  projection_error 0.59224937  add 0.17607414  cm 0.14490312
+val epoch 200 step 200 seg 0.00213535  ver 0.00167095  precision 0.95633560  recall 0.96066397  projection_error 0.99800399  add 0.68363273  cm 0.98303393 
+occ_val epoch 200 step 200 seg 0.00732342  ver 0.04257845  precision 0.89745164  recall 0.70414990  projection_error 0.60488627  add 0.19460826  cm 0.14995788 
+
+pvnet with inital estimate of original pvnet (batch size 24)
+val epoch 191 step 191 seg 0.00208409  ver 0.00166139  precision 0.95650631  recall 0.96143305  projection_error 0.99800399  add 0.54191617  cm 0.98103792
+occ_val epoch 191 step 191 seg 0.00744151  ver 0.04248320  precision 0.89153552  recall 0.71486318  projection_error 0.60151643  add 0.19123842  cm 0.15080034
+val epoch 196 step 196 seg 0.00203577  ver 0.00167831  precision 0.95434225  recall 0.96510410  projection_error 0.99700599  add 0.68762475  cm 0.98303393
+occ_val epoch 196 step 196 seg 0.00780848  ver 0.04240980  precision 0.89572376  recall 0.70534647  projection_error 0.59983151  add 0.19629318  cm 0.14995788
+val epoch 200 step 200 seg 0.00205887  ver 0.00175155  precision 0.95937395  recall 0.95910102  projection_error 0.99700599  add 0.51397206  cm 0.98103792
+occ_val epoch 200 step 200 seg 0.00815264  ver 0.04212260  precision 0.89987612  recall 0.68819469  projection_error 0.58972199  add 0.17860152  cm 0.14490312 
+
+March 31
+training failed due to singularity in torch.solve. fixed with try except in ransac voting gpu. retraining from scratch.
