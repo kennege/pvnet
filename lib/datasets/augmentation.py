@@ -116,7 +116,7 @@ def crop_or_padding(img, mask, hcoords, hratio, wratio):
 
     return out_img,out_mask,hcoords,
 
-def crop_or_padding_to_fixed_size_instance(img, mask, vertex_init, hcoords, th, tw, overlap_ratio=0.5):
+def crop_or_padding_to_fixed_size_instance(img, mask, hcoords, th, tw, overlap_ratio=0.5):
     h,w,_=img.shape
     hs,ws=np.nonzero(mask)
 
@@ -137,7 +137,7 @@ def crop_or_padding_to_fixed_size_instance(img, mask, vertex_init, hcoords, th, 
 
     img=img[hbeg:hend, wbeg:wend]
     mask=mask[hbeg:hend, wbeg:wend]
-    vertex_init = vertex_init[:,hbeg:hend, wbeg:wend]
+    # vertex_init = vertex_init[:,hbeg:hend, wbeg:wend]
 
     hcoords[:, 0]-=wbeg*hcoords[:, 2]
     hcoords[:, 1]-=hbeg*hcoords[:, 2]
@@ -157,7 +157,7 @@ def crop_or_padding_to_fixed_size_instance(img, mask, vertex_init, hcoords, th, 
 
         img, mask = new_img, new_mask
 
-    return img, mask, vertex_init, hcoords
+    return img, mask, hcoords
 
 def crop_or_padding_to_fixed_size(img, mask, th, tw):
     h,w,_=img.shape
@@ -249,7 +249,7 @@ def compute_resize_range(mask,hmin,hmax,wmin,wmax):
     return rmin, rmax
 
 #### higher level api #####
-def crop_resize_instance_v1(img, mask, vertex_init, hcoords, imheight, imwidth,
+def crop_resize_instance_v1(img, mask, hcoords, imheight, imwidth,
                             overlap_ratio=0.5, ratio_min=0.8, ratio_max=1.2):
     '''
 
@@ -273,21 +273,21 @@ def crop_resize_instance_v1(img, mask, vertex_init, hcoords, imheight, imwidth,
     target_height=int(imheight*resize_ratio)
     target_width=int(imwidth*resize_ratio)
 
-    img, mask, vertex_init, hcoords = crop_or_padding_to_fixed_size_instance(
-        img, mask, vertex_init, hcoords, target_height, target_width, overlap_ratio)
+    img, mask, hcoords = crop_or_padding_to_fixed_size_instance(
+        img, mask, hcoords, target_height, target_width, overlap_ratio)
     
     img = cv2.resize(img, (imwidth, imheight), interpolation=cv2.INTER_LINEAR)
     mask = cv2.resize(mask, (imwidth, imheight), interpolation=cv2.INTER_NEAREST)
 
-    vertex_init = vertex_init.permute(1,2,0)
-    vertex_init = vertex_init.numpy()
-    vertex_init = cv2.resize(vertex_init, (imwidth, imheight), interpolation=cv2.INTER_LINEAR)
-    vertex_init = torch.from_numpy(vertex_init).permute(2,0,1)
+    # vertex_init = vertex_init.permute(1,2,0)
+    # vertex_init = vertex_init.numpy()
+    # vertex_init = cv2.resize(vertex_init, (imwidth, imheight), interpolation=cv2.INTER_LINEAR)
+    # vertex_init = torch.from_numpy(vertex_init).permute(2,0,1)
 
     hcoords[:, 0] = hcoords[:, 0] / resize_ratio
     hcoords[:, 1] = hcoords[:, 1] / resize_ratio
 
-    return img, mask, vertex_init, hcoords
+    return img, mask, hcoords
 
 def crop_resize_instance_v2(img, mask, hcoords, imheight, imwidth,
                             overlap_ratio=0.5, hmin=30, hmax=135, wmin=30, wmax=130):

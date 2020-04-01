@@ -9,11 +9,11 @@
   "lr":1e-3,
   "lr_decay_rate":0.85,
   "lr_decay_epoch":20,
-  "train_batch_size":12,
+  "train_batch_size":24,
   "test_batch_size":1,
   "motion_model":false,
 
-  "resume":false,
+  "resume":true,
   "finetune":false,
   "epoch_num":200,
 
@@ -32,7 +32,7 @@
 
   "eval_epoch":true,
   "eval_inter":1,
-  "eval_epoch_begin":1,
+  "eval_epoch_begin":0,
 
   "vote_type":"Farthest",
 
@@ -68,9 +68,9 @@
     "saturation":0.05,
     "hue":0.05,
 
-    "wmax":640,
+    "wmax":320,
     "wmin":128,
-    "hmax":480,
+    "hmax":240,
     "hmin":128,
     "size_int":8,
 

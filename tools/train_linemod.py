@@ -1,8 +1,9 @@
 import sys
 
 from skimage.io import imsave
+from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-
+import glob
 
 sys.path.append('.')
 sys.path.append('..')
@@ -85,22 +86,13 @@ class NetWrapper(nn.Module):
         self.net=net
         self.criterion=nn.CrossEntropyLoss(reduce=False)
 
-    def forward(self, image, mask, vertex, vertex_weights, vertex_init):       
-        # keypointGT = np.array([[np.random.uniform(0,imageDim[0]), np.random.uniform(0,imageDim[1])]])
-        # vertexEst = ld.compute_vertex(mask, keypointGT)
-        # seg_init, vertex_init = self.initNet(image)
-        # vertexEst = torch.tensor(np.zeros((image.shape[0], 18, image.shape[2], image.shape[3]))).float().cuda()
-        # for iter in range(5):
-        seg_pred, vertex_pred = self.net(image, vertex_init)
-        
+    def forward(self, image, mask, vertex, vertex_weights, vertex_init):      
+        seg_pred, vertex_pred = self.net(image, vertex_init)       
         loss_seg = self.criterion(seg_pred, mask)
         loss_seg = torch.mean(loss_seg.view(loss_seg.shape[0],-1),1)
         loss_vertex = smooth_l1_loss(vertex_pred, vertex, vertex_weights, reduce=False)
         precision, recall = compute_precision_recall(seg_pred, mask)
-
-            # vertexEst = vertexEst - 0.2*vertex_pred
         return seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall
-
 
 class EvalWrapper(nn.Module):
     def forward(self, seg_pred, vertex_pred, use_argmax=True, use_uncertainty=False):
@@ -151,12 +143,10 @@ def train(net, PVNet, optimizer, dataloader, epoch):
     size = len(dataloader)
     end=time.time()
     for idx, data in enumerate(dataloader):
-        image, mask, vertex, vertex_weights, pose, _, vertex_init = [d.cuda() for d in data]
+        image, mask, vertex, vertex_weights, pose, _ = [d.cuda() for d in data]
         data_time.update(time.time()-end)
-        # with torch.no_grad():
-            # print(vertex_init.shape)
-            # _, vertex_init = PVNet(image)
-            # print(vertex_init.shape)
+        with torch.no_grad():
+            _, vertex_init = PVNet(image)
         seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
         loss_seg, loss_vertex, precision,recall=[torch.mean(val) for val in (loss_seg, loss_vertex, precision, recall)]
         loss = loss_seg + loss_vertex * train_cfg['vertex_loss_ratio']
@@ -201,10 +191,10 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
         if use_camera_intrinsic:
             image, mask, vertex, vertex_weights, pose, corner_target, Ks = [d.cuda() for d in data]
         else:
-            image, mask, vertex, vertex_weights, pose, corner_target, vertex_init = [d.cuda() for d in data]
+            image, mask, vertex, vertex_weights, pose, corner_target = [d.cuda() for d in data]
 
         with torch.no_grad():
-            # _, vertex_init = PVNet(image)
+            _, vertex_init = PVNet(image)
             seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
 
             loss_seg, loss_vertex, precision, recall=[torch.mean(val) for val in (loss_seg, loss_vertex, precision, recall)]
@@ -283,21 +273,31 @@ def train_net():
     net=NetWrapper(net)
     net=DataParallel(net).cuda()
 
+    # load original pvnet to perform forward pass to get initial estimate
     PVModelDir='/home/gerard/pvnet/data/model/cat_linemod_train/199.pth'
     PVNet=Resnet18_8s_Orig(ver_dim=vote_num*2, seg_dim=2)
     PVNet.load_state_dict(torch.load(PVModelDir)['net'])
     PVNet=DataParallel(PVNet).cuda()
     PVNet.eval()
 
+    # load all initial estimates into RAM
+    # path = "/home/gerard/vertex_init/"
+    # print('loading initial estimates...')
+    # vertex_inits = {}
+    # for f in tqdm(glob.glob('{}*.npy'.format(path))):
+    #     vertex_inits[f] = np.load(f)
+
     optimizer = optim.Adam(net.parameters(), lr=train_cfg['lr'])
     model_dir=os.path.join(cfg.MODEL_DIR,train_cfg['model_name'])
     motion_model=train_cfg['motion_model']
     print('motion state {}'.format(motion_model))
 
+    for param_group in optimizer.param_groups:
+        lr = param_group['lr']
+
     if args.test_model:
         begin_epoch=load_model(net.module.net, optimizer, model_dir, args.load_epoch)
-        for param_group in optimizer.param_groups:
-            lr = param_group['lr']
+        
         if args.normal:
             print('testing normal linemod ...') 
             image_db = LineModImageDB(args.linemod_cls,has_render_set=False,
@@ -341,9 +341,9 @@ def train_net():
             begin_epoch=load_model(net.module.net, optimizer, model_dir)
 
             # reset learning rate
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = train_cfg['lr']
-                lr = param_group['lr']
+            # for param_group in optimizer.param_groups:
+            #     param_group['lr'] = train_cfg['lr']
+            #     lr = param_group['lr']
 
         image_db = LineModImageDB(args.linemod_cls,
                                   has_fuse_set=train_cfg['use_fuse'],
@@ -377,6 +377,8 @@ def train_net():
 
         for epoch in range(begin_epoch, train_cfg['epoch_num']):
             adjust_learning_rate(optimizer,epoch,train_cfg['lr_decay_rate'],train_cfg['lr_decay_epoch'])
+            for param_group in optimizer.param_groups:
+                lr = param_group['lr']
             train(net, PVNet, optimizer, train_loader, epoch)
             val(net, PVNet, val_loader, epoch, lr, writer, use_motion=motion_model)
             if args.linemod_cls in cfg.occ_linemod_cls_names:

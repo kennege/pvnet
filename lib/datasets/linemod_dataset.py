@@ -177,6 +177,7 @@ class LineModDatasetRealAug(Dataset):
                  augment=False, cfg=default_aug_cfg, background_mask_out=False, use_intrinsic=False,
                  use_motion=False):
         self.imagedb=imagedb
+        # self.vertex_inits = vertex_inits
         self.augment=augment
         self.background_mask_out=background_mask_out
         self.use_intrinsic=use_intrinsic
@@ -202,17 +203,19 @@ class LineModDatasetRealAug(Dataset):
         index, height, width = index_tuple
 
         # crop the input image by half, ensuring divisible by 8 - 31/03/2020
-        height = int(round(height/16)*8)
-        width = int(round(width/16)*8)
-
+        # height = int(round(height/16)*8)
+        # width = int(round(width/16)*8)
+        
         rgb_path = os.path.join(self.data_prefix,self.imagedb[index]['rgb_pth'])
         mask_path = os.path.join(self.data_prefix,self.imagedb[index]['dpt_pth'])
 
-        path = self.imagedb[index]['rgb_pth']
-        path = path.replace("/","_") # 31/03/20
-        path = path.replace(".jpg","") # 31/03/20 
-        fname = '/home/gerard/vertex_init/{}.npy'.format(path) # 31/03/20
-        vertex_init = torch.squeeze(torch.from_numpy(np.load(fname)),0)
+        # path = self.imagedb[index]['rgb_pth']
+        # path = path.replace("/","_") # 31/03/20
+        # path = path.replace(".jpg",".npy") # 31/03/20 
+        # fname = '/home/gerard/vertex_init/{}.npy'.format(path) # 31/03/20
+        # vertex_init = torch.squeeze(torch.from_numpy(np.load(fname)),0)
+        # print(path)
+        # vertex_init = self.vertex_inits[path]
 
         pose = self.imagedb[index]['RT'].copy()
         rgb = read_rgb_np(rgb_path)
@@ -226,11 +229,13 @@ class LineModDatasetRealAug(Dataset):
 
         hcoords=VotingType.get_data_pts_2d(self.vote_type,self.imagedb[index])
 
+        rgb, mask, hcoords = self.crop_by_half(rgb, mask, hcoords)
+
         if self.use_intrinsic:
             K = torch.tensor(self.imagedb[index]['K'].astype(np.float32))
 
         if self.augment:
-            rgb, mask, vertex_init, hcoords = self.augmentation(rgb, mask, vertex_init, hcoords, height, width)
+            rgb, mask, hcoords = self.augmentation(rgb, mask, hcoords, height, width)
 
         ver = compute_vertex_hcoords(mask, hcoords, self.use_motion)
         ver=torch.tensor(ver, dtype=torch.float32).permute(2, 0, 1)
@@ -257,13 +262,13 @@ class LineModDatasetRealAug(Dataset):
         if self.use_intrinsic:
             return rgb, mask, ver, ver_weight, pose, hcoords, K
         else:
-            return rgb, mask, ver, ver_weight, pose, hcoords, vertex_init
+            return rgb, mask, ver, ver_weight, pose, hcoords
 
 
     def __len__(self):
         return len(self.imagedb)
 
-    def augmentation(self, img, mask, vertex_init, hcoords, height, width):
+    def augmentation(self, img, mask, hcoords, height, width):
         foreground=np.sum(mask)
         # randomly mask out to add occlusion
         if self.cfg['mask'] and np.random.random() < 0.5:
@@ -289,7 +294,7 @@ class LineModDatasetRealAug(Dataset):
                     #    overlap_ratio**2 of instance region.
                     # 2. if the region is larger than original image, then padding 0
                     # 3. then resize the cropped image to [height, width] (bilinear for image, nearest for mask)
-                    img, mask, vertex_init, hcoords = crop_resize_instance_v1(img, mask, vertex_init, hcoords, height, width, self.cfg['overlap_ratio'],
+                    img, mask, hcoords = crop_resize_instance_v1(img, mask, hcoords, height, width, self.cfg['overlap_ratio'],
                                                                  self.cfg['resize_ratio_min'], self.cfg['resize_ratio_max'])
         else:
             img, mask = crop_or_padding_to_fixed_size(img, mask, height, width)
@@ -299,7 +304,37 @@ class LineModDatasetRealAug(Dataset):
         if self.cfg['flip'] and np.random.random() < 0.5:
             img, mask, hcoords = flip(img, mask, hcoords)
 
-        return img, mask, vertex_init, hcoords
+        return img, mask, hcoords
+
+    def crop_by_half(self, rgb, mask, hcoords):
+        center = hcoords[8,0:2]
+        width = (rgb.shape[1])/2 # 640
+        height = (rgb.shape[0])/2 # 480
+        hbeg = round(center[1]-(height/2))
+        hend = round(center[1]+(height/2))
+        wbeg = round(center[0]-(width/2))
+        wend = round(center[0]+(width/2))
+        
+        # keep cropped image within image boundary
+        if (hbeg < 0):
+            hend = hend - hbeg
+            hbeg = 0
+        if (hend > height*2):
+            hbeg = hbeg - (hend-height)
+            hend = height
+        if (wbeg < 0):
+            wend = wend - wbeg
+            wbeg = 0        
+        if (wend > width*2):
+            wbeg = wbeg - (wend-width)
+            wend = width   
+ 
+        rgb = rgb[int(hbeg):int(hend),int(wbeg):int(wend)]
+        mask = mask[int(hbeg):int(hend),int(wbeg):int(wend)]
+        hcoords[:,0] = hcoords[:,0] - wbeg
+        hcoords[:,1] = hcoords[:,1] - hbeg
+        
+        return rgb, mask, hcoords
 
 
 class ImageSizeBatchSampler(Sampler):
