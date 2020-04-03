@@ -81,18 +81,24 @@ recorder = Recorder(True,os.path.join(cfg.REC_DIR,train_cfg['model_name']),
 # poses_gt=[]
 
 class NetWrapper(nn.Module):
-    def __init__(self,net):
+    def __init__(self,imNet, estNet):
         super(NetWrapper,self).__init__()
-        self.net=net
-        self.criterion=nn.CrossEntropyLoss(reduce=False)
+        self.imNet=imNet
+        self.estNet=estNet
+        self.criterionSeg=nn.CrossEntropyLoss(reduce=False)
+        self.criterionQ=nn.SmoothL1Loss(reduce=False)
 
     def forward(self, image, mask, vertex, vertex_weights, vertex_init):      
-        seg_pred, vertex_pred = self.net(image, vertex_init)       
-        loss_seg = self.criterion(seg_pred, mask)
+        vertex_pred, x2s, x4s, x8s = self.estNet(vertex_init)
+        seg_pred, q_pred = self.imNet(image, x2s, x4s, x8s)
+
+        loss_seg = self.criterionSeg(seg_pred, mask)
         loss_seg = torch.mean(loss_seg.view(loss_seg.shape[0],-1),1)
+
         loss_vertex = smooth_l1_loss(vertex_pred, vertex, vertex_weights, reduce=False)
+        loss_q = self.criterionQ(q_pred,(vertex_pred-vertex))
         precision, recall = compute_precision_recall(seg_pred, mask)
-        return seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall
+        return seg_pred, vertex_pred, loss_seg, loss_vertex, loss_q, precision, recall
 
 class EvalWrapper(nn.Module):
     def forward(self, seg_pred, vertex_pred, use_argmax=True, use_uncertainty=False):
@@ -147,9 +153,9 @@ def train(net, PVNet, optimizer, dataloader, epoch):
         data_time.update(time.time()-end)
         with torch.no_grad():
             _, vertex_init = PVNet(image)
-        seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
-        loss_seg, loss_vertex, precision,recall=[torch.mean(val) for val in (loss_seg, loss_vertex, precision, recall)]
-        loss = loss_seg + loss_vertex * train_cfg['vertex_loss_ratio']
+        seg_pred, vertex_pred, loss_seg, loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
+        loss_seg, loss_vertex, loss_q, precision,recall=[torch.mean(val) for val in (loss_seg, loss_vertex, loss_q, precision, recall)]
+        loss = loss_seg + (loss_vertex+loss_q) * train_cfg['vertex_loss_ratio']
         vals=(loss_seg,loss_vertex,precision,recall)
         for rec,val in zip(recs,vals): rec.update(val)
 
@@ -269,23 +275,17 @@ def train_net():
     tf_dir = './runs/' + train_cfg['exp_name']
     writer = SummaryWriter(log_dir=tf_dir)
 
-    net=RefineNet(ver_dim=vote_num*2, seg_dim=2)
-    net=NetWrapper(net)
+    imNet=ImageUNet(ver_dim=vote_num*2, seg_dim=2)
+    estNet = EstimateUNet(ver_dim=vote_num*2, seg_dim=2)
+    net=NetWrapper(imNet,estNet)
     net=DataParallel(net).cuda()
 
     # load original pvnet to perform forward pass to get initial estimate
     PVModelDir='/home/gerard/pvnet/data/model/cat_linemod_train/199.pth'
-    PVNet=Resnet18_8s_Orig(ver_dim=vote_num*2, seg_dim=2)
+    PVNet=PVnet(ver_dim=vote_num*2, seg_dim=2)
     PVNet.load_state_dict(torch.load(PVModelDir)['net'])
     PVNet=DataParallel(PVNet).cuda()
     PVNet.eval()
-
-    # load all initial estimates into RAM
-    # path = "/home/gerard/vertex_init/"
-    # print('loading initial estimates...')
-    # vertex_inits = {}
-    # for f in tqdm(glob.glob('{}*.npy'.format(path))):
-    #     vertex_inits[f] = np.load(f)
 
     optimizer = optim.Adam(net.parameters(), lr=train_cfg['lr'])
     model_dir=os.path.join(cfg.MODEL_DIR,train_cfg['model_name'])

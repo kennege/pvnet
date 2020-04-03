@@ -229,7 +229,7 @@ class LineModDatasetRealAug(Dataset):
 
         hcoords=VotingType.get_data_pts_2d(self.vote_type,self.imagedb[index])
 
-        rgb, mask, hcoords = self.crop_by_half(rgb, mask, hcoords)
+        # rgb, mask, hcoords = self.crop_by_half(rgb, mask, hcoords)
 
         if self.use_intrinsic:
             K = torch.tensor(self.imagedb[index]['K'].astype(np.float32))
