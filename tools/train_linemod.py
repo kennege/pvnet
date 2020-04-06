@@ -86,7 +86,6 @@ class NetWrapper(nn.Module):
         self.imNet=imNet
         self.estNet=estNet
         self.criterionSeg=nn.CrossEntropyLoss(reduce=False)
-        self.criterionQ=nn.SmoothL1Loss(reduce=False)
 
     def forward(self, image, mask, vertex, vertex_weights, vertex_init):      
         vertex_pred, x2s, x4s, x8s = self.estNet(vertex_init)
@@ -95,8 +94,8 @@ class NetWrapper(nn.Module):
         loss_seg = self.criterionSeg(seg_pred, mask)
         loss_seg = torch.mean(loss_seg.view(loss_seg.shape[0],-1),1)
 
-        loss_vertex = smooth_l1_loss(vertex_pred, vertex, vertex_weights, reduce=False)
-        loss_q = self.criterionQ(q_pred,(vertex_pred-vertex))
+        loss_vertex = smooth_l1_loss(vertex_pred, vertex_init, vertex_weights, reduce=False)
+        loss_q = smooth_l1_loss(q_pred,(vertex_init-vertex), vertex_weights, reduce=False)
         precision, recall = compute_precision_recall(seg_pred, mask)
         return seg_pred, vertex_pred, loss_seg, loss_vertex, loss_q, precision, recall
 
