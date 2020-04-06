@@ -1,0 +1,5 @@
+lr_decay_rate: 0.85
+lr_decay_epoch: 5
+batch size: 32
+
+also include: .log file
