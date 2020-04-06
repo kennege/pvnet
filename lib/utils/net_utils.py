@@ -123,10 +123,11 @@ def load_net(net, model_dir):
     return pretrained_model['epoch'] + 1
 
 
-def save_model(net, optim, epoch, model_dir):
+def save_model(imNet, estNet, optim, epoch, model_dir):
     os.system('mkdir -p {}'.format(model_dir))
     torch.save({
-        'net': net.state_dict(),
+        'imNet': imNet.state_dict(),
+        'estNet': estNet.state_dict(),
         'optim': optim.state_dict(),
         'epoch': epoch
     }, os.path.join(model_dir, '{}.pth'.format(epoch)))

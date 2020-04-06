@@ -93,6 +93,8 @@ class NetWrapper(nn.Module):
 
         loss_seg = self.criterionSeg(seg_pred, mask)
         loss_seg = torch.mean(loss_seg.view(loss_seg.shape[0],-1),1)
+        delta = 1
+        vertex_pred = vertex_pred - (delta*q_pred)
 
         loss_vertex = smooth_l1_loss(vertex_pred, vertex_init, vertex_weights, reduce=False)
         loss_q = smooth_l1_loss(q_pred,(vertex_init-vertex), vertex_weights, reduce=False)
@@ -200,7 +202,7 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
 
         with torch.no_grad():
             _, vertex_init = PVNet(image)
-            seg_pred, vertex_pred, loss_seg, loss_vertex, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
+            seg_pred, vertex_pred, loss_seg, loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
 
             loss_seg, loss_vertex, precision, recall=[torch.mean(val) for val in (loss_seg, loss_vertex, precision, recall)]
 
@@ -383,7 +385,7 @@ def train_net():
             if args.linemod_cls in cfg.occ_linemod_cls_names:
                 val(net, PVNet, occ_val_loader, epoch, lr, writer, 'occ_val',use_motion=motion_model)
 
-            save_model(net.module.net, optimizer, epoch, model_dir)
+            save_model(net.module.imNet, net.module.estNet, optimizer, epoch, model_dir)
 
 # def save_dataset(dataset,prefix=''):
 #     with open('assets/{}{}.txt'.format(prefix,args.linemod_cls),'w') as f:
