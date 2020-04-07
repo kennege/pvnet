@@ -12,7 +12,7 @@
   "test_batch_size":1,
   "motion_model":false,
 
-  "resume":false,
+  "resume":true,
   "finetune":false,
   "epoch_num":200,
 

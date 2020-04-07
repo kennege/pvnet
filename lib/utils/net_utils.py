@@ -90,7 +90,7 @@ def conv(num_input, num_output, kernel_size, stride, padding, relu=True):
         )
 
 
-def load_model(model, optim, model_dir, epoch=-1):
+def load_model(imNet, estNet, optim, model_dir, epoch=-1):
     if not os.path.exists(model_dir):
         return 0
 
@@ -102,7 +102,9 @@ def load_model(model, optim, model_dir, epoch=-1):
     else:
         pth = epoch
     pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
-    model.load_state_dict(pretrained_model['net'])
+    print(os.path.join(model_dir, '{}.pth'.format(pth)))
+    imNet.load_state_dict(pretrained_model['imNet'])
+    estNet.load_state_dict(pretrained_model['estNet'])
     optim.load_state_dict(pretrained_model['optim'])
     print('load model {} epoch {}'.format(model_dir,pretrained_model['epoch']))
     return pretrained_model['epoch'] + 1

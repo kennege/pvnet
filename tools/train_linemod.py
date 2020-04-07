@@ -339,7 +339,7 @@ def train_net():
     else:
         begin_epoch=0
         if train_cfg['resume']:
-            begin_epoch=load_model(net.module.net, optimizer, model_dir)
+            begin_epoch=load_model(net.module.imNet, net.module.estNet, optimizer, model_dir)
 
             # reset learning rate
             # for param_group in optimizer.param_groups:
@@ -362,7 +362,7 @@ def train_net():
         train_batch_sampler = ImageSizeBatchSampler(train_sampler, train_cfg['train_batch_size'], False, cfg=train_cfg['aug_cfg'])
         train_loader = DataLoader(train_set, batch_sampler=train_batch_sampler, num_workers=12)
 
-        val_db=image_db.test_real_set+image_db.val_real_set # test on the full test set
+        val_db= image_db.val_real_set#image_db.test_real_set+ # test on the full test set
         val_set = LineModDatasetRealAug(val_db, cfg.LINEMOD, vote_type, augment=False, cfg=train_cfg['aug_cfg'], use_motion=motion_model)
         val_sampler = SequentialSampler(val_set)
         val_batch_sampler = ImageSizeBatchSampler(val_sampler, train_cfg['test_batch_size'], False, cfg=train_cfg['aug_cfg'])

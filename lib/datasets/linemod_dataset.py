@@ -307,9 +307,15 @@ class LineModDatasetRealAug(Dataset):
         return img, mask, hcoords
 
     def crop_by_half(self, rgb, mask, hcoords):
-        center = hcoords[8,0:2]
-        width = (rgb.shape[1])/2 # 640
-        height = (rgb.shape[0])/2 # 480
+
+        height,width,_=rgb.shape
+        hs,ws=np.nonzero(mask)
+
+        hmin,hmax=np.min(hs),np.max(hs)
+        wmin,wmax=np.min(ws),np.max(ws)
+        fh,fw=hmax-hmin,wmax-wmin
+        center = [fh/2,fw/2]
+
         hbeg = round(center[1]-(height/2))
         hend = round(center[1]+(height/2))
         wbeg = round(center[0]-(width/2))
