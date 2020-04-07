@@ -314,31 +314,40 @@ class LineModDatasetRealAug(Dataset):
         hmin,hmax=np.min(hs),np.max(hs)
         wmin,wmax=np.min(ws),np.max(ws)
         fh,fw=hmax-hmin,wmax-wmin
-        center = [fh/2,fw/2]
+        center = [hmin + (fh/2),wmin + (fw/2)]
 
-        hbeg = round(center[1]-(height/2))
-        hend = round(center[1]+(height/2))
-        wbeg = round(center[0]-(width/2))
-        wend = round(center[0]+(width/2))
-        
-        # keep cropped image within image boundary
-        if (hbeg < 0):
-            hend = hend - hbeg
-            hbeg = 0
-        if (hend > height*2):
-            hbeg = hbeg - (hend-height)
-            hend = height
-        if (wbeg < 0):
-            wend = wend - wbeg
-            wbeg = 0        
-        if (wend > width*2):
-            wbeg = wbeg - (wend-width)
-            wend = width   
+        if fh > height/2 or fw > width/2: # object won't be completely within cropped region
+            rgb = rgb[int(hmin):int(hmax),int(wmin):int(wmax)]
+            mask = mask[int(hmin):int(hmax),int(wmin):int(wmax)]
+            rgb = cv2.resize(rgb,(width/2,height/2),interpolation=cv2.INTER_LINEAR)
+            mask = cv2.resize(mask,(width/2,height/2),interpolation=cv2.INTER_LINEAR)
+            hcoords[:,0]-= wmin
+            hcoords[:,1]-= hmin
+
+        else:
+            hbeg = round(center[1]-(height/2))
+            hend = round(center[1]+(height/2))
+            wbeg = round(center[0]-(width/2))
+            wend = round(center[0]+(width/2))
+            
+            # keep cropped image within image boundary
+            if (hbeg < 0):
+                hend = hend - hbeg
+                hbeg = 0
+            if (hend > height*2):
+                hbeg = hbeg - (hend-height)
+                hend = height
+            if (wbeg < 0):
+                wend = wend - wbeg
+                wbeg = 0        
+            if (wend > width*2):
+                wbeg = wbeg - (wend-width)
+                wend = width   
  
-        rgb = rgb[int(hbeg):int(hend),int(wbeg):int(wend)]
-        mask = mask[int(hbeg):int(hend),int(wbeg):int(wend)]
-        hcoords[:,0] = hcoords[:,0] - wbeg
-        hcoords[:,1] = hcoords[:,1] - hbeg
+            rgb = rgb[int(hbeg):int(hend),int(wbeg):int(wend)]
+            mask = mask[int(hbeg):int(hend),int(wbeg):int(wend)]
+            hcoords[:,0]-= wbeg
+            hcoords[:,1]-= hbeg
         
         return rgb, mask, hcoords
 
