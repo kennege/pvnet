@@ -3,7 +3,7 @@
 
   "network":"resnet18_8s",
   
-  "exp_name":"06042020",
+  "exp_name":"08042020",
 
   "lr":1e-3,
   "lr_decay_rate":0.85,

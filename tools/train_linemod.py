@@ -93,12 +93,14 @@ class NetWrapper(nn.Module):
 
         loss_seg = self.criterionSeg(seg_pred, mask)
         loss_seg = torch.mean(loss_seg.view(loss_seg.shape[0],-1),1)
-        delta = 1
-        vertex_pred = vertex_pred - (delta*q_pred)
-
+          
         loss_vertex = smooth_l1_loss(vertex_pred, vertex_init, vertex_weights, reduce=False)
         loss_q = smooth_l1_loss(q_pred,(vertex_init-vertex), vertex_weights, reduce=False)
         precision, recall = compute_precision_recall(seg_pred, mask)
+        
+        delta = 1
+        vertex_pred = vertex_pred - (delta*q_pred)
+
         return seg_pred, vertex_pred, loss_seg, loss_vertex, loss_q, precision, recall
 
 class EvalWrapper(nn.Module):
@@ -150,10 +152,13 @@ def train(net, PVNet, optimizer, dataloader, epoch):
     size = len(dataloader)
     end=time.time()
     for idx, data in enumerate(dataloader):
-        image, mask, vertex, vertex_weights, pose, _ = [d.cuda() for d in data]
+        image, mask, vertex, vertex_weights, pose, hcoords = [d.cuda() for d in data]
         data_time.update(time.time()-end)
         with torch.no_grad():
             _, vertex_init = PVNet(image)
+        # for row in hcoords.size()[0]:
+        #     hcoords[row,0:2]+=random.uniform(-0.1,0.1)*hcoords[row,0:2]
+        # vertex_init = ld.compute_vertex_hcoords(mask,hcoords)
         seg_pred, vertex_pred, loss_seg, loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
         loss_seg, loss_vertex, loss_q, precision,recall=[torch.mean(val) for val in (loss_seg, loss_vertex, loss_q, precision, recall)]
         loss = loss_seg + (loss_vertex+loss_q) * train_cfg['vertex_loss_ratio']
@@ -202,6 +207,9 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
 
         with torch.no_grad():
             _, vertex_init = PVNet(image)
+            # for row in corner_target.size()[0]:
+            #     corner_target[row,0:2]+=random.uniform(-0.1,0.1)*corner_target[row,0:2]
+            # vertex_init = ld.compute_vertex_hcoords(mask,corner_target)
             seg_pred, vertex_pred, loss_seg, loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
 
             loss_seg, loss_vertex, precision, recall=[torch.mean(val) for val in (loss_seg, loss_vertex, precision, recall)]
@@ -342,9 +350,9 @@ def train_net():
             begin_epoch=load_model(net.module.imNet, net.module.estNet, optimizer, model_dir)
 
             # reset learning rate
-            # for param_group in optimizer.param_groups:
-            #     param_group['lr'] = train_cfg['lr']
-            #     lr = param_group['lr']
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = train_cfg['lr']
+                lr = param_group['lr']
 
         image_db = LineModImageDB(args.linemod_cls,
                                   has_fuse_set=train_cfg['use_fuse'],
