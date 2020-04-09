@@ -98,7 +98,7 @@ class NetWrapper(nn.Module):
         loss_q = smooth_l1_loss(q_pred,(vertex_init-vertex), vertex_weights, reduce=False)
         precision, recall = compute_precision_recall(seg_pred, mask)
         
-        delta = 1
+        delta = 0.1
         vertex_pred = vertex_pred - (delta*q_pred)
 
         return seg_pred, vertex_pred, loss_seg, loss_vertex, loss_q, precision, recall
@@ -155,10 +155,23 @@ def train(net, PVNet, optimizer, dataloader, epoch):
         image, mask, vertex, vertex_weights, pose, hcoords = [d.cuda() for d in data]
         data_time.update(time.time()-end)
         with torch.no_grad():
-            _, vertex_init = PVNet(image)
-        # for row in hcoords.size()[0]:
-        #     hcoords[row,0:2]+=random.uniform(-0.1,0.1)*hcoords[row,0:2]
-        # vertex_init = ld.compute_vertex_hcoords(mask,hcoords)
+             _, vertex_init = PVNet(image)
+
+        # vertex_init = torch.from_numpy(np.zeros((image.shape[0],18,image.shape[2], image.shape[3])))
+        # for b in range(hcoords.shape[0]):  # for image in batch
+        #     # for i in range(hcoords[b].shape[0]): # for coordinate in hcoords
+        #         # hcoords[b][i,0:2]+=random.uniform(-0.1,0.1)*hcoords[b][i,0:2]
+        #     # print(mask[b,:,:].cpu().numpy().shape)
+        #     # print(hcoords[b,:,:].cpu().numpy())
+        #     v = ld.compute_vertex_hcoords(mask[b,:,:].cpu().numpy(),hcoords[b,:,:].cpu().numpy())
+        #     print(v)
+        #     v = torch.from_numpy(v)
+        #     v = v.permute(2,0,1)
+        #     vertex_init[b,:,:,:] = v
+        #     # print(vertex_init[b,:,:,:])
+        # vertex_init = vertex_init.float()
+
+        # vertex_init = vertex
         seg_pred, vertex_pred, loss_seg, loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
         loss_seg, loss_vertex, loss_q, precision,recall=[torch.mean(val) for val in (loss_seg, loss_vertex, loss_q, precision, recall)]
         loss = loss_seg + (loss_vertex+loss_q) * train_cfg['vertex_loss_ratio']
