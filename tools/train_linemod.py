@@ -207,9 +207,6 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
 
         with torch.no_grad():
             _, vertex_init = PVNet(image)
-            # for row in corner_target.size()[0]:
-            #     corner_target[row,0:2]+=random.uniform(-0.1,0.1)*corner_target[row,0:2]
-            # vertex_init = ld.compute_vertex_hcoords(mask,corner_target)
             seg_pred, vertex_pred, loss_seg, loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
 
             loss_seg, loss_vertex, precision, recall=[torch.mean(val) for val in (loss_seg, loss_vertex, precision, recall)]

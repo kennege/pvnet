@@ -137,7 +137,6 @@ def crop_or_padding_to_fixed_size_instance(img, mask, hcoords, th, tw, overlap_r
 
     img=img[hbeg:hend, wbeg:wend]
     mask=mask[hbeg:hend, wbeg:wend]
-    # vertex_init = vertex_init[:,hbeg:hend, wbeg:wend]
 
     hcoords[:, 0]-=wbeg*hcoords[:, 2]
     hcoords[:, 1]-=hbeg*hcoords[:, 2]

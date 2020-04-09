@@ -2,6 +2,7 @@ import random
 import sys
 import time
 import math
+import scipy.misc
 
 sys.path.append('.')
 
@@ -201,21 +202,15 @@ class LineModDatasetRealAug(Dataset):
 
     def __getitem__(self, index_tuple):
         index, height, width = index_tuple
-
-        # crop the input image by half, ensuring divisible by 8 - 31/03/2020
-        # height = int(round(height/16)*8)
-        # width = int(round(width/16)*8)
         
         rgb_path = os.path.join(self.data_prefix,self.imagedb[index]['rgb_pth'])
         mask_path = os.path.join(self.data_prefix,self.imagedb[index]['dpt_pth'])
-
-        # path = self.imagedb[index]['rgb_pth']
-        # path = path.replace("/","_") # 31/03/20
-        # path = path.replace(".jpg",".npy") # 31/03/20 
-        # fname = '/home/gerard/vertex_init/{}.npy'.format(path) # 31/03/20
-        # vertex_init = torch.squeeze(torch.from_numpy(np.load(fname)),0)
-        # print(path)
-        # vertex_init = self.vertex_inits[path]
+        # pathR = self.imagedb[index]['rgb_pth']
+        # rgb_path = '/home/gerard/cropped/{}'.format(pathR)
+        # pathM = self.imagedb[index]['dpt_pth']
+        # mask_path = '/home/gerard/cropped/{}'.format(pathM) 
+        # pathH = pathR.replace(".jpg","_h.npy")
+        # fnameH = '/home/gerard/cropped/{}'.format(pathH)
 
         pose = self.imagedb[index]['RT'].copy()
         rgb = read_rgb_np(rgb_path)
@@ -228,8 +223,29 @@ class LineModDatasetRealAug(Dataset):
             mask=np.asarray(mask==(cfg.linemod_cls_names.index(self.imagedb[index]['cls_typ'])+1),np.int32)
 
         hcoords=VotingType.get_data_pts_2d(self.vote_type,self.imagedb[index])
+        # hcoords = np.load(fnameH)
 
-        # rgb, mask, hcoords = self.crop_by_half(rgb, mask, hcoords)
+        rgb, mask, hcoords = self.crop_by_half(rgb, mask, hcoords)
+        pathR = self.imagedb[index]['rgb_pth']
+        fnameR = '/home/gerard/cropped/{}'.format(pathR) 
+        pathM = self.imagedb[index]['dpt_pth']
+        pathM = pathM.replace(".jpg",".npy")
+        pathM = pathM.replace(".png",".npy")
+        fnameM = '/home/gerard/cropped/{}'.format(pathM) 
+        pathH = pathR
+        pathH = pathH.replace(".jpg","_h.npy")
+        pathH = pathH.replace(".png","_h.npy")
+        fnameH = '/home/gerard/cropped/{}'.format(pathH)
+        scipy.misc.imsave(fnameR,rgb)
+        np.save(fnameM,mask)
+        np.save(fnameH,hcoords)
+        
+        rgb = read_rgb_np(fnameR)
+        mask = np.load(fnameM)
+        # maskC=np.asarray(mask,np.int32)
+        # print(maskC.dtype)
+        # print(mask.dtype)
+        hcoords = np.load(fnameH)
 
         if self.use_intrinsic:
             K = torch.tensor(self.imagedb[index]['K'].astype(np.float32))
@@ -317,38 +333,42 @@ class LineModDatasetRealAug(Dataset):
         center = [hmin + (fh/2),wmin + (fw/2)]
 
         if fh > height/2 or fw > width/2: # object won't be completely within cropped region
+            print('too big')
             rgb = rgb[int(hmin):int(hmax),int(wmin):int(wmax)]
             mask = mask[int(hmin):int(hmax),int(wmin):int(wmax)]
             rgb = cv2.resize(rgb,(width/2,height/2),interpolation=cv2.INTER_LINEAR)
-            mask = cv2.resize(mask,(width/2,height/2),interpolation=cv2.INTER_LINEAR)
+            mask = cv2.resize(mask,(width/2,height/2),interpolation=cv2.INTER_NEAREST)
             hcoords[:,0]-= wmin
             hcoords[:,1]-= hmin
 
         else:
-            hbeg = round(center[1]-(height/2))
-            hend = round(center[1]+(height/2))
-            wbeg = round(center[0]-(width/2))
-            wend = round(center[0]+(width/2))
+            hbeg = round(center[0]-(height/4))
+            hend = round(center[0]+(height/4))
+            wbeg = round(center[1]-(width/4))
+            wend = round(center[1]+(width/4))
             
             # keep cropped image within image boundary
             if (hbeg < 0):
                 hend = hend - hbeg
                 hbeg = 0
-            if (hend > height*2):
+            if (hend > height):
                 hbeg = hbeg - (hend-height)
                 hend = height
             if (wbeg < 0):
                 wend = wend - wbeg
                 wbeg = 0        
-            if (wend > width*2):
+            if (wend > width):
                 wbeg = wbeg - (wend-width)
                 wend = width   
  
             rgb = rgb[int(hbeg):int(hend),int(wbeg):int(wend)]
             mask = mask[int(hbeg):int(hend),int(wbeg):int(wend)]
-            hcoords[:,0]-= wbeg
-            hcoords[:,1]-= hbeg
-        
+            hcoords[:,0]-= wbeg*hcoords[:, 2]
+            hcoords[:,1]-= hbeg*hcoords[:, 2]
+            hcoords[:,0] = hcoords[:,0] / 0.5
+            hcoords[:,1] = hcoords[:,1] / 0.5
+        if rgb.shape[0]!=240 or rgb.shape[1]!=320:
+            print(rgb.shape)
         return rgb, mask, hcoords
 
 
