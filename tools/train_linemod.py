@@ -88,8 +88,8 @@ class NetWrapper(nn.Module):
         self.criterionSeg=nn.CrossEntropyLoss(reduce=False)
 
     def forward(self, image, mask, vertex, vertex_weights, vertex_init):      
-        vertex_pred, x2s, x4s, x8s = self.estNet(vertex_init)
-        seg_pred, q_pred = self.imNet(image, x2s, x4s, x8s)
+        vertex_pred, x2s, x4s, x8s, xfc = self.estNet(vertex_init)
+        seg_pred, q_pred = self.imNet(image, x2s, x4s, x8s, xfc)
 
         loss_seg = self.criterionSeg(seg_pred, mask)
         loss_seg = torch.mean(loss_seg.view(loss_seg.shape[0],-1),1)

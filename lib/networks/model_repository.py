@@ -160,7 +160,7 @@ class ImageDecoder(nn.Module):
 
         # x8s->128
         self.conv8s=nn.Sequential(
-            nn.Conv2d(512, s8dim, 3, 1, 1, bias=False),
+            nn.Conv2d(768, s8dim, 3, 1, 1, bias=False),
             nn.BatchNorm2d(s8dim),
             nn.LeakyReLU(0.1,True)
         )
@@ -192,8 +192,9 @@ class ImageDecoder(nn.Module):
         self.seg_dim = seg_dim
 
 
-    def forward(self, x, x2s, x4s, x8s, xfc, x2sEst, x4sEst, x8sEst):
-        fm=self.conv8s(torch.cat([xfc,x8s, x8sEst],1))
+    def forward(self, x, x2s, x4s, x8s, xfc, x2sEst, x4sEst, x8sEst, xfcEst):
+
+        fm=self.conv8s(torch.cat([xfcEst, xfc, x8s, x8sEst],1))
         fm=self.up8sto4s(fm)
 
         fm=self.conv4s(torch.cat([fm,x4s, x4sEst],1))
@@ -268,9 +269,9 @@ class ImageUNet(nn.Module):
         self.imageEncoder = ImageEncoder(ver_dim, seg_dim, fcdim, s8dim, s4dim, s2dim, raw_dim)
         self.imageDecoder = ImageDecoder(ver_dim, seg_dim, fcdim, s8dim, s4dim, s2dim, raw_dim)
 
-    def forward(self, img, x2sEst, x4sEst, x8sEst):
+    def forward(self, img, x2sEst, x4sEst, x8sEst, xfcEst):
         x2sIm, x4sIm, x8sIm, xfcIm = self.imageEncoder(img)       
-        seg_pred, q_pred = self.imageDecoder(img, x2sIm, x4sIm, x8sIm, xfcIm, x2sEst, x4sEst, x8sEst)
+        seg_pred, q_pred = self.imageDecoder(img, x2sIm, x4sIm, x8sIm, xfcIm, x2sEst, x4sEst, x8sEst, xfcEst)
 
         return seg_pred, q_pred
             
@@ -285,4 +286,4 @@ class EstimateUNet(nn.Module):
         x2sEst, x4sEst, x8sEst, xfcEst = self.estimateEncoder(vertexEst)
         ver_pred, x2s, x4s, x8s = self.estimateDecoder(vertexEst, x2sEst, x4sEst, x8sEst, xfcEst)
 
-        return ver_pred, x2s, x4s, x8s
+        return ver_pred, x2s, x4s, x8s, xfcEst

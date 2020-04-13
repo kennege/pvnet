@@ -3,11 +3,11 @@
 
   "network":"resnet18_8s",
   
-  "exp_name":"09042020",
+  "exp_name":"11042020",
 
   "lr":1e-3,
   "lr_decay_rate":0.85,
-  "lr_decay_epoch":10,
+  "lr_decay_epoch":15,
   "train_batch_size":32,
   "test_batch_size":1,
   "motion_model":false,
