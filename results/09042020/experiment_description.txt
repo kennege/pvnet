@@ -1,0 +1,10 @@
+initial estimate: PVNet
+lr_decay_rate: 0.85
+lr_decay_epoch: 10
+batch size: 32
+added skip connection between bottlenecks
+first test of cropping
+add better than pvnet
+
+
+
