@@ -139,6 +139,7 @@ class EstimateEncoder(nn.Module):
         self.seg_dim=seg_dim
 
     def forward(self, x, feature_alignment=False):
+
         x = self.conv1(x)   
         x = self.bn1(x)
         
@@ -165,7 +166,6 @@ class ImageDecoder(nn.Module):
             nn.LeakyReLU(0.1,True)
         )
         self.up8sto4s=nn.UpsamplingBilinear2d(scale_factor=2)
-
         # x4s->64
         self.conv4s=nn.Sequential(
             nn.Conv2d(256, s4dim, 3, 1, 1, bias=False),
@@ -245,7 +245,6 @@ class EstimateDecoder(nn.Module):
         )
 
         self.seg_dim = seg_dim
-
 
     def forward(self, x, x2s, x4s, x8s, xfc):
         fm=self.conv8s(torch.cat([xfc,x8s],1))

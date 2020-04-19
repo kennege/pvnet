@@ -101,7 +101,7 @@ def load_model(imNet, estNet, optim, model_dir, epoch=-1):
         pth = max(pths)
     else:
         pth = epoch
-    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(100)))
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
     print(os.path.join(model_dir, '{}.pth'.format(pth)))
     imNet.load_state_dict(pretrained_model['imNet'])
     estNet.load_state_dict(pretrained_model['estNet'])
@@ -119,7 +119,7 @@ def load_net(net, model_dir):
         return 0
 
     pth = max(pths)
-    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(100)))
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
     # print(os.path.join(model_dir, '{}.pth'.format(pth)))
     net.load_state_dict(pretrained_model['net'])
     return pretrained_model['epoch'] + 1

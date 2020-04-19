@@ -224,4 +224,3 @@ class Evaluator(object):
             print('5 cm 5 degree metric: {}'.format(np.mean(self.cm_degree_5_recorder)))
 
         return np.mean(self.projection_2d_recorder),np.mean(self.add_recorder),np.mean(self.cm_degree_5_recorder)
-
