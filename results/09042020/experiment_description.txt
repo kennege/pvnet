@@ -6,5 +6,6 @@ added skip connection between bottlenecks
 first test of cropping
 add better than pvnet
 
+git message: "running network with cropping"
 
 
