@@ -3,13 +3,12 @@
 
   "network":"resnet18_8s",
   
-  "exp_name":"18042020",
+  "exp_name":"20042020_2",
 
-  "crop":true,
   "lr":1e-3,
   "lr_decay_rate":0.85,
   "lr_decay_epoch":5,
-  "train_batch_size":64,
+  "train_batch_size":20,
   "test_batch_size":1,
   "motion_model":false,
 
@@ -68,9 +67,9 @@
     "saturation":0.05,
     "hue":0.05,
 
-    "wmax":320,
+    "wmax":640,
     "wmin":128,
-    "hmax":240,
+    "hmax":480,
     "hmin":128,
     "size_int":8,
 

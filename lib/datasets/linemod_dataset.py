@@ -218,25 +218,25 @@ class LineModDatasetRealAug(Dataset):
 
         hcoords=VotingType.get_data_pts_2d(self.vote_type,self.imagedb[index])
 
-        if self.augment==True and self.cfg['crop']:
-            rgb, mask, hcoords = self.crop_by_half(rgb, mask, hcoords)
-            pathR = self.imagedb[index]['rgb_pth']
-            fnameR = '/home/gerard/cropped/{}'.format(pathR) 
-            pathM = self.imagedb[index]['dpt_pth']
-            pathM = pathM.replace(".jpg",".npy")
-            pathM = pathM.replace(".png",".npy")
-            fnameM = '/home/gerard/cropped/{}'.format(pathM) 
-            pathH = pathR
-            pathH = pathH.replace(".jpg","_h.npy")
-            pathH = pathH.replace(".png","_h.npy")
-            fnameH = '/home/gerard/cropped/{}'.format(pathH)
-            scipy.misc.imsave(fnameR,rgb)
-            np.save(fnameM,mask)
-            np.save(fnameH,hcoords)
+        # if self.augment==True and self.cfg['crop']:
+        #     rgb, mask, hcoords = self.crop_by_half(rgb, mask, hcoords)
+        #     pathR = self.imagedb[index]['rgb_pth']
+        #     fnameR = '/home/gerard/cropped/{}'.format(pathR) 
+        #     pathM = self.imagedb[index]['dpt_pth']
+        #     pathM = pathM.replace(".jpg",".npy")
+        #     pathM = pathM.replace(".png",".npy")
+        #     fnameM = '/home/gerard/cropped/{}'.format(pathM) 
+        #     pathH = pathR
+        #     pathH = pathH.replace(".jpg","_h.npy")
+        #     pathH = pathH.replace(".png","_h.npy")
+        #     fnameH = '/home/gerard/cropped/{}'.format(pathH)
+        #     scipy.misc.imsave(fnameR,rgb)
+        #     np.save(fnameM,mask)
+        #     np.save(fnameH,hcoords)
             
-            rgb = read_rgb_np(fnameR)
-            mask = np.load(fnameM)
-            hcoords = np.load(fnameH)
+        #     rgb = read_rgb_np(fnameR)
+        #     mask = np.load(fnameM)
+        #     hcoords = np.load(fnameH)
 
         if self.use_intrinsic:
             K = torch.tensor(self.imagedb[index]['K'].astype(np.float32))

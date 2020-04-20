@@ -106,7 +106,7 @@ class NetWrapper(nn.Module):
         # loss_seg = loss_seg + loss_seg_pred
 
         loss_vertex = smooth_l1_loss(vertex_pred, vertex_init, vertex_weights, reduce=False)
-        loss_q = smooth_l1_loss(q_pred,vertex_init-vertex, vertex_weights, reduce=False)
+        loss_q = smooth_l1_loss(q_pred,(vertex_init-vertex), vertex_weights, reduce=False)
         precision, recall = compute_precision_recall(seg_pred, mask)
     
 
@@ -211,52 +211,51 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
     for rec in recs: rec.reset()
 
     test_begin = time.time()
-         
     eval_net=DataParallel(EvalWrapper().cuda()) if not use_motion else DataParallel(MotionEvalWrapper().cuda())
     uncertain_eval_net=DataParallel(UncertaintyEvalWrapper().cuda())
     net.eval()
-    
-    proj_err_list = []
-    add_list = []
-    for t in range(10): # iterative evaluation
-        print('evaluation iter {}'.format(t))
-        evaluator = Evaluator() 
-        for idx, data in enumerate(dataloader):
-            if use_camera_intrinsic:
-                image, mask, vertex, vertex_weights, pose, corner_target, Ks = [d.cuda() for d in data]
-            else:
-                image, mask, vertex, vertex_weights, pose, corner_target = [d.cuda() for d in data]
+               
+    if val_prefix=='val':
+        iterations = 2
+    else:
+        iterations = 2
+    evaluatorList = []
+    for i in range(iterations):
+        evaluatorList.append(Evaluator())
 
-            with torch.no_grad():
-                seg_init, vertex_init = PVNet(image)
-                mask_init=torch.argmax(seg_init,1)
-                # est_init = torch.cat([vertex_init, seg_init],1)
+    for idx, data in enumerate(dataloader):
+        if use_camera_intrinsic:
+            image, mask, vertex, vertex_weights, pose, corner_target, Ks = [d.cuda() for d in data]
+        else:
+            image, mask, vertex, vertex_weights, pose, corner_target = [d.cuda() for d in data]
 
-                seg_pred, vertex_pred, q_pred, loss_seg, loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
-                loss_seg, loss_vertex, loss_q, precision, recall=[torch.mean(val) for val in (loss_seg, loss_vertex, loss_q, precision, recall)]
+        with torch.no_grad():
+            
+            pose=pose.cpu().numpy()
 
+            for t in range(iterations): # iterative evaluation
+                if t==0:
+                    seg_init, vertex_init = PVNet(image)
+                    mask_init=torch.argmax(seg_init,1)
+                else:              
+                    seg_pred, vertex_pred, q_pred, loss_seg, loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
+                    loss_seg, loss_vertex, loss_q, precision, recall=[torch.mean(val) for val in (loss_seg, loss_vertex, loss_q, precision, recall)]
+                               
                 if (train_cfg['eval_epoch']
                     and epoch%train_cfg['eval_inter']==0
                     and epoch>=train_cfg['eval_epoch_begin']) or args.test_model:
-                    
-                    pose=pose.cpu().numpy()
 
-                    if t==0:
-                        mask_pred = mask_init
-                        vertex_pred = vertex_init
-                    else:
+                    if t>0:
                         delta = 1/(4*t)
-                        mask_pred = torch.argmax(seg_pred,1)
-                        vertex_pred = vertex_pred - (delta*q_pred)                         
-                        # mask_pred = est_pred[:,18,:,:]
-                    
-                    # vertex_pred = est_pred[:,0:18,:,:]  
+                        mask_init = torch.argmax(seg_pred,1)
+                        vertex_init = vertex_init - (delta*q_pred)
+                                                                                                            
                     if args.use_uncertainty_pnp:
-                        mean,cov_inv=uncertain_eval_net(mask_pred,vertex_pred)
+                        mean,cov_inv=uncertain_eval_net(mask_init,vertex_init)
                         mean=mean.cpu().numpy()
                         cov_inv=cov_inv.cpu().numpy()
                     else: 
-                        corner_pred=eval_net(mask_pred,vertex_pred).cpu().detach().numpy()
+                        corner_pred=eval_net(mask_init,vertex_init).cpu().detach().numpy()
                         
                     b=pose.shape[0]
                     pose_preds=[]
@@ -264,44 +263,49 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
                         intri_type='use_intrinsic' if use_camera_intrinsic else 'linemod'
                         K=Ks[bi].cpu().numpy() if use_camera_intrinsic else None
                         if args.use_uncertainty_pnp:
-                            pose_preds.append(evaluator.evaluate_uncertainty(mean[bi],cov_inv[bi],pose[bi],args.linemod_cls,
+                            pose_preds.append(evaluatorList[t].evaluate_uncertainty(mean[bi],cov_inv[bi],pose[bi],args.linemod_cls,
                                                                             intri_type,vote_type,intri_matrix=K))
                         else:
-                            pose_preds.append(evaluator.evaluate(corner_pred[bi],pose[bi],args.linemod_cls,intri_type,
+                            pose_preds.append(evaluatorList[t].evaluate(corner_pred[bi],pose[bi],args.linemod_cls,intri_type,
                                                                 vote_type,intri_matrix=K))
                     
-                    if args.save_inter_result:
-                        mask_pr = torch.argmax(seg_pred, 1).cpu().detach().numpy()
-                        mask_gt = mask.cpu().detach().numpy()
-                        # assume batch size = 1
-                        imsave(os.path.join(args.save_inter_dir, '{}_mask_pr.png'.format(idx)), mask_pr[0])
-                        imsave(os.path.join(args.save_inter_dir, '{}_mask_gt.png'.format(idx)), mask_gt[0])
-                        imsave(os.path.join(args.save_inter_dir, '{}_rgb.png'.format(idx)),
-                            imagenet_to_uint8(image.cpu().detach().numpy()[0]))
-                        save_pickle([pose_preds[0],pose[0]],os.path.join(args.save_inter_dir, '{}_pose.pkl'.format(idx)))
-
+            if args.save_inter_result:
+                mask_pr = torch.argmax(seg_pred, 1).cpu().detach().numpy()
+                mask_gt = mask.cpu().detach().numpy()
+                # assume batch size = 1
+                imsave(os.path.join(args.save_inter_dir, '{}_mask_pr.png'.format(idx)), mask_pr[0])
+                imsave(os.path.join(args.save_inter_dir, '{}_mask_gt.png'.format(idx)), mask_gt[0])
+                imsave(os.path.join(args.save_inter_dir, '{}_rgb.png'.format(idx)),
+                    imagenet_to_uint8(image.cpu().detach().numpy()[0]))
+                save_pickle([pose_preds[0],pose[0]],os.path.join(args.save_inter_dir, '{}_pose.pkl'.format(idx)))
+           
+            if t>0:
                 vals=[loss_seg,loss_vertex,loss_q,precision,recall]
                 for rec,val in zip(recs,vals): rec.update(val)
-        
-        proj_err,add,cm=evaluator.average_precision(False)
+
+    proj_err_list = []
+    add_list = []
+    for i in range(iterations):
+        proj_err,add,cm=evaluatorList[i].average_precision(False)
         proj_err_list.append(proj_err)
         add_list.append(add)
         print(proj_err)
         print(add)
-           
-    plt.figure(figsize=(4,2))
-    plt.subplot(121)
-    plt.plot(add_list)
-    plt.subplot(122)
-    plt.plot(proj_err_list)
-    plt.savefig('{}.png'.format(epoch))
+    
+    if val_prefix == 'val':         
+        plt.figure(figsize=(4,2))
+        plt.subplot(121)
+        plt.plot(add_list)
+        plt.subplot(122)
+        plt.plot(proj_err_list)
+        plt.savefig('{}.png'.format(epoch))
 
     with torch.no_grad():
         batch_size = image.shape[0]
         nrow = 5 if batch_size > 5 else batch_size
         recorder.rec_segmentation(F.softmax(seg_pred, dim=1), num_classes=2, nrow=nrow,
                                   step=epoch, name='{}/image/seg'.format(val_prefix))
-        recorder.rec_vertex(vertex_pred, vertex_weights, nrow=4, step=epoch, name='{}/image/ver'.format(val_prefix))
+        recorder.rec_vertex(vertex_init, vertex_weights, nrow=4, step=epoch, name='{}/image/ver'.format(val_prefix))
     
     losses_batch=OrderedDict()
     for name, rec in zip(recs_names, recs): losses_batch['{}/'.format(val_prefix) + name] = rec.avg
@@ -309,7 +313,7 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
         and epoch%train_cfg['eval_inter']==0
         and epoch>=train_cfg['eval_epoch_begin']
         and val_prefix == 'val') or args.test_model:
-        proj_err,add,cm=evaluator.average_precision(False)
+        proj_err,add,cm=evaluatorList[-1].average_precision(False)
         losses_batch['{}/scalar/projection_error'.format(val_prefix)]=proj_err
         losses_batch['{}/scalar/add'.format(val_prefix)]=add
         losses_batch['{}/scalar/cm'.format(val_prefix)]=cm
