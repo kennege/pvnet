@@ -1,4 +1,6 @@
 import sys
+import scipy.misc
+from tqdm import tqdm
 
 from skimage.io import imsave
 from tqdm import tqdm
@@ -152,10 +154,17 @@ def train(net, PVNet, optimizer, dataloader, epoch):
     size = len(dataloader)
     end=time.time()
     for idx, data in enumerate(dataloader):
-        image, mask, vertex, vertex_weights, pose, hcoords = [d.cuda() for d in data]
+        image, mask, vertex, vertex_weights,_,_,_,_ = [d.cuda() for d in data]
+        image = image.cuda()
+        mask = mask.cuda()
+        vertex = vertex.cuda()
+        vertex_weights = vertex_weights.cuda()
+        pose = pose.cuda()
+        corner_targets = corner_targets.cuda()
+
         data_time.update(time.time()-end)
         with torch.no_grad():
-            seg_init, vertex_init = PVNet(image)
+            _, vertex_init = PVNet(image)
             # mask_init=torch.unsqueeze(torch.argmax(seg_init,1),1).float()     
             # est_init = torch.cat([vertex_init, seg_init],1)
             # vertex_init = vertex
@@ -216,18 +225,28 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
     net.eval()
                
     if val_prefix=='val':
-        iterations = 2
+        iterations = 20
     else:
         iterations = 2
     evaluatorList = []
+    losses_vertex = np.zeros(iterations)
+    losses_seg = np.zeros(iterations)
+    losses_q = np.zeros(iterations)
     for i in range(iterations):
         evaluatorList.append(Evaluator())
 
-    for idx, data in enumerate(dataloader):
+        
+    for idx, data in tqdm(enumerate(dataloader)):
         if use_camera_intrinsic:
             image, mask, vertex, vertex_weights, pose, corner_target, Ks = [d.cuda() for d in data]
         else:
-            image, mask, vertex, vertex_weights, pose, corner_target = [d.cuda() for d in data]
+            image, mask, vertex, vertex_weights, pose, corner_target, mask_pth, rgb_pth = [d for d in data]
+            image = image.cuda()
+            mask = mask.cuda()
+            vertex = vertex.cuda()
+            vertex_weights = vertex_weights.cuda()
+            pose = pose.cuda()
+            corner_target = corner_target.cuda()
 
         with torch.no_grad():
             
@@ -240,15 +259,40 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
                 else:              
                     seg_pred, vertex_pred, q_pred, loss_seg, loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
                     loss_seg, loss_vertex, loss_q, precision, recall=[torch.mean(val) for val in (loss_seg, loss_vertex, loss_q, precision, recall)]
-                               
+                    losses_seg[t] = losses_seg[t] + loss_seg      
+                    losses_vertex[t] = losses_vertex[t] + loss_vertex
+                    losses_q[t] = losses_q[t] + loss_q
+                
                 if (train_cfg['eval_epoch']
                     and epoch%train_cfg['eval_inter']==0
                     and epoch>=train_cfg['eval_epoch_begin']) or args.test_model:
 
                     if t>0:
-                        delta = 1/(4*t)
+                        delta = 1/(2*t)
                         mask_init = torch.argmax(seg_pred,1)
                         vertex_init = vertex_init - (delta*q_pred)
+
+                    # if t==iterations-1:   
+                    #     fnameM = '/home/gerard/masks/{}'.format(mask_pth[0]) 
+                    #     maskOut = mask_init.squeeze(0).cpu().numpy()
+                    #     imOut = image[0,:,:,:].permute(1,2,0).cpu().numpy()
+                    #     plt.imshow(imOut)
+                    #     plt.imshow(maskOut,cmap='jet',alpha=0.5)
+                    #     plt.savefig(fnameM)
+                        
+                    #     fnameR = '/home/gerard/vfields/{}'.format(rgb_pth[0])
+                    #     plt.figure()
+                    #     plt.imshow(imOut)
+    
+                    #     X,Y = np.meshgrid(np.arange(0,image.shape[3]), np.arange(0,image.shape[2]))
+                    #     U = vertex_init[0,3,:,:].cpu().numpy()
+                    #     V = vertex_init[0,2,:,:].cpu().numpy()
+                    #     print('X: ',X.shape)
+                    #     print('Y: ',Y.shape)
+                    #     print('U: ',U)
+                    #     plt.quiver(X,Y,U,V)
+                        
+                    #     plt.savefig(fnameR)                    
                                                                                                             
                     if args.use_uncertainty_pnp:
                         mean,cov_inv=uncertain_eval_net(mask_init,vertex_init)
@@ -289,15 +333,38 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
         proj_err,add,cm=evaluatorList[i].average_precision(False)
         proj_err_list.append(proj_err)
         add_list.append(add)
+        losses_seg[i] = losses_seg[i] / (iterations-1)
+        losses_vertex[i] = losses_vertex[i] / (iterations-1)
+        losses_q[i] = losses_q[i] / (iterations-1)
         print(proj_err)
         print(add)
-    
+        print(losses_seg[i])
+        print(losses_vertex[i])
+        print(losses_q[i])
+        print('\n')
+
     if val_prefix == 'val':         
-        plt.figure(figsize=(4,2))
-        plt.subplot(121)
-        plt.plot(add_list)
-        plt.subplot(122)
-        plt.plot(proj_err_list)
+        fig = plt.figure(figsize=[15,8])
+        ax1 = plt.subplot(231)
+        ax1.plot(add_list)
+        ax1.set_title('ADD')
+        ax1.grid()
+        ax2 = plt.subplot(232)
+        ax2.plot(proj_err_list)
+        ax2.set_title('2D proj')
+        ax2.grid()
+        ax3 = plt.subplot(233)
+        ax3.plot(losses_seg[1:-1])
+        ax3.set_title('loss_seg')
+        ax3.grid()
+        ax4 = plt.subplot(234)
+        ax4.plot(losses_vertex[1:-1])
+        ax4.set_title('loss_vertex')
+        ax4.grid()
+        ax5 = plt.subplot(235)
+        ax5.plot(losses_q[1:-1])
+        ax5.set_title('loss_q')
+        ax5.grid()
         plt.savefig('{}.png'.format(epoch))
 
     with torch.no_grad():

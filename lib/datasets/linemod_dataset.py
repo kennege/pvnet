@@ -269,7 +269,7 @@ class LineModDatasetRealAug(Dataset):
         if self.use_intrinsic:
             return rgb, mask, ver, ver_weight, pose, hcoords, K
         else:
-            return rgb, mask, ver, ver_weight, pose, hcoords
+            return rgb, mask, ver, ver_weight, pose, hcoords, self.imagedb[index]['dpt_pth'], self.imagedb[index]['rgb_pth']
 
 
     def __len__(self):
@@ -321,7 +321,7 @@ class LineModDatasetRealAug(Dataset):
         hmin,hmax=np.min(hs),np.max(hs)
         wmin,wmax=np.min(ws),np.max(ws)
         fh,fw=hmax-hmin,wmax-wmin
-        center = [hmin + (fh/2),wmin + (fw/2)]
+        center = [hmin + random.uniform(-fh/2,fh/2), wmin + random.uniform(-fw/2,fw/2)] # add stochastics to cropping
 
         if fh > height/2 or fw > width/2: # object won't be completely within cropped region
             print('too big')
