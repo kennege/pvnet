@@ -241,6 +241,9 @@ class LineModDatasetRealAug(Dataset):
         if self.use_intrinsic:
             K = torch.tensor(self.imagedb[index]['K'].astype(np.float32))
 
+        # newHeight = int(120)
+        # newWidth = int(160)
+        # rgb, mask, hcoords = self.resize(rgb, mask, hcoords, newHeight, newWidth)
         if self.augment:
             rgb, mask, hcoords = self.augmentation(rgb, mask, hcoords, height, width)
 
@@ -313,53 +316,17 @@ class LineModDatasetRealAug(Dataset):
 
         return img, mask, hcoords
 
-    def crop_by_half(self, rgb, mask, hcoords):
+    def resize(self, rgb, mask, hcoords, newHeight, newWidth):
 
-        height,width,_=rgb.shape
-        hs,ws=np.nonzero(mask)
+        resize_ratio = 640/newWidth
 
-        hmin,hmax=np.min(hs),np.max(hs)
-        wmin,wmax=np.min(ws),np.max(ws)
-        fh,fw=hmax-hmin,wmax-wmin
-        center = [hmin + random.uniform(-fh/2,fh/2), wmin + random.uniform(-fw/2,fw/2)] # add stochastics to cropping
+        rgb = cv2.resize(rgb, (newWidth, newHeight), interpolation=cv2.INTER_LINEAR)
+        mask = cv2.resize(mask, (newWidth, newHeight), interpolation=cv2.INTER_NEAREST)
 
-        if fh > height/2 or fw > width/2: # object won't be completely within cropped region
-            print('too big')
-            rgb = rgb[int(hmin):int(hmax),int(wmin):int(wmax)]
-            mask = mask[int(hmin):int(hmax),int(wmin):int(wmax)]
-            rgb = cv2.resize(rgb,(width/2,height/2),interpolation=cv2.INTER_LINEAR)
-            mask = cv2.resize(mask,(width/2,height/2),interpolation=cv2.INTER_NEAREST)
-            hcoords[:,0]-= wmin
-            hcoords[:,1]-= hmin
+        hcoords[:, 0] = hcoords[:, 0] / resize_ratio
+        hcoords[:, 1] = hcoords[:, 1] / resize_ratio
 
-        else:
-            hbeg = round(center[0]-(height/4))
-            hend = round(center[0]+(height/4))
-            wbeg = round(center[1]-(width/4))
-            wend = round(center[1]+(width/4))
-            
-            # keep cropped image within image boundary
-            if (hbeg < 0):
-                hend = hend - hbeg
-                hbeg = 0
-            if (hend > height):
-                hbeg = hbeg - (hend-height)
-                hend = height
-            if (wbeg < 0):
-                wend = wend - wbeg
-                wbeg = 0        
-            if (wend > width):
-                wbeg = wbeg - (wend-width)
-                wend = width   
- 
-            rgb = rgb[int(hbeg):int(hend),int(wbeg):int(wend)]
-            mask = mask[int(hbeg):int(hend),int(wbeg):int(wend)]
-            hcoords[:,0]-= wbeg*hcoords[:, 2]
-            hcoords[:,1]-= hbeg*hcoords[:, 2]
-        if rgb.shape[0]!=240 or rgb.shape[1]!=320:
-            print(rgb.shape)
         return rgb, mask, hcoords
-
 
 class ImageSizeBatchSampler(Sampler):
     def __init__(self, sampler, batch_size, drop_last, cfg=default_aug_cfg):

@@ -107,7 +107,7 @@ class NetWrapper(nn.Module):
 
         # loss_seg = loss_seg + loss_seg_pred
 
-        loss_vertex = smooth_l1_loss(vertex_pred, vertex_init, vertex_weights, reduce=False)
+        loss_vertex = 100 * smooth_l1_loss(vertex_pred, vertex_init, vertex_weights, reduce=False)
         loss_q = smooth_l1_loss(q_pred,(vertex_init-vertex), vertex_weights, reduce=False)
         precision, recall = compute_precision_recall(seg_pred, mask)
     
@@ -154,13 +154,11 @@ def train(net, PVNet, optimizer, dataloader, epoch):
     size = len(dataloader)
     end=time.time()
     for idx, data in enumerate(dataloader):
-        image, mask, vertex, vertex_weights,_,_,_,_ = [d.cuda() for d in data]
+        image, mask, vertex, vertex_weights,_,_,_,_ = [d for d in data]
         image = image.cuda()
         mask = mask.cuda()
         vertex = vertex.cuda()
         vertex_weights = vertex_weights.cuda()
-        pose = pose.cuda()
-        corner_targets = corner_targets.cuda()
 
         data_time.update(time.time()-end)
         with torch.no_grad():
@@ -187,7 +185,7 @@ def train(net, PVNet, optimizer, dataloader, epoch):
         seg_pred, vertex_pred, q_pred, loss_seg, loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
         # vertex_pred = est_pred[:,0:18,:,:]
         loss_seg, loss_vertex, loss_q, precision,recall=[torch.mean(val) for val in (loss_seg, loss_vertex, loss_q, precision, recall)]
-        loss = loss_seg + (loss_vertex+loss_q) * train_cfg['vertex_loss_ratio']
+        loss = (loss_vertex) + loss_q #* train_cfg['vertex_loss_ratio']
         vals=(loss_seg,loss_vertex,loss_q,precision,recall)
         for rec,val in zip(recs,vals): rec.update(val)
 
@@ -199,12 +197,11 @@ def train(net, PVNet, optimizer, dataloader, epoch):
         end=time.time()
 
         if idx % train_cfg['loss_rec_step'] == 0:
-            step = epoch * size + idx
-            losses_batch=OrderedDict()
-            for name,rec in zip(recs_names,recs): losses_batch['train/'+name]=rec.avg
-            recorder.rec_loss_batch(losses_batch,step,epoch)
-            for rec in recs: rec.reset()
-
+            step = epoch * size + idx        # losses_seg[i] = losses_seg[i] / (iterations-1)
+        # losses_vertex[i] = losses_vertex[i] / (iterations-1)
+        # losses_q[i] = losses_q[i] / (iterations-1)
+        # norm_q[i] = norm_q[i] / (iterations)
+        # norm_v[i] = norm_v[i] / (iterations)
             data_time.reset()
             batch_time.reset()
 
@@ -225,17 +222,19 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
     net.eval()
                
     if val_prefix=='val':
-        iterations = 20
+        iterations = train_cfg["iterations"]
     else:
         iterations = 2
     evaluatorList = []
     losses_vertex = np.zeros(iterations)
     losses_seg = np.zeros(iterations)
     losses_q = np.zeros(iterations)
+    norm_q = np.zeros(iterations)
+    norm_v = np.zeros(iterations)
     for i in range(iterations):
         evaluatorList.append(Evaluator())
 
-        
+    data_counter = 0    
     for idx, data in tqdm(enumerate(dataloader)):
         if use_camera_intrinsic:
             image, mask, vertex, vertex_weights, pose, corner_target, Ks = [d.cuda() for d in data]
@@ -254,46 +253,30 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
 
             for t in range(iterations): # iterative evaluation
                 if t==0:
-                    seg_init, vertex_init = PVNet(image)
-                    mask_init=torch.argmax(seg_init,1)
+                    seg_pred, vertex_init = PVNet(image)
+                    mask_init= mask #torch.argmax(seg_init,1)
                 else:              
                     seg_pred, vertex_pred, q_pred, loss_seg, loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
                     loss_seg, loss_vertex, loss_q, precision, recall=[torch.mean(val) for val in (loss_seg, loss_vertex, loss_q, precision, recall)]
                     losses_seg[t] = losses_seg[t] + loss_seg      
                     losses_vertex[t] = losses_vertex[t] + loss_vertex
                     losses_q[t] = losses_q[t] + loss_q
+                    norm_q[t] = norm_q[t] + (1/torch.sum(vertex_weights).cpu().numpy())*(np.linalg.norm((vertex_weights* q_pred).cpu().numpy()))**2
+                    norm_v[t] = norm_v[t] +  (1/torch.sum(vertex_weights).cpu().numpy())*np.linalg.norm((vertex_weights * (vertex_init - vertex)).cpu().numpy())**2
                 
                 if (train_cfg['eval_epoch']
                     and epoch%train_cfg['eval_inter']==0
                     and epoch>=train_cfg['eval_epoch_begin']) or args.test_model:
 
                     if t>0:
-                        delta = 1/(2*t)
-                        mask_init = torch.argmax(seg_pred,1)
+                        exp = train_cfg["eval_name"]
+                        delta = train_cfg["delta"]
+                        mask_init = mask
                         vertex_init = vertex_init - (delta*q_pred)
-
-                    # if t==iterations-1:   
-                    #     fnameM = '/home/gerard/masks/{}'.format(mask_pth[0]) 
-                    #     maskOut = mask_init.squeeze(0).cpu().numpy()
-                    #     imOut = image[0,:,:,:].permute(1,2,0).cpu().numpy()
-                    #     plt.imshow(imOut)
-                    #     plt.imshow(maskOut,cmap='jet',alpha=0.5)
-                    #     plt.savefig(fnameM)
-                        
-                    #     fnameR = '/home/gerard/vfields/{}'.format(rgb_pth[0])
-                    #     plt.figure()
-                    #     plt.imshow(imOut)
-    
-                    #     X,Y = np.meshgrid(np.arange(0,image.shape[3]), np.arange(0,image.shape[2]))
-                    #     U = vertex_init[0,3,:,:].cpu().numpy()
-                    #     V = vertex_init[0,2,:,:].cpu().numpy()
-                    #     print('X: ',X.shape)
-                    #     print('Y: ',Y.shape)
-                    #     print('U: ',U)
-                    #     plt.quiver(X,Y,U,V)
-                        
-                    #     plt.savefig(fnameR)                    
-                                                                                                            
+   
+                    if data_counter==1000:
+                        plot_results(image, rgb_pth, mask_init, mask_pth, vertex_init, t)
+                                                                                                    
                     if args.use_uncertainty_pnp:
                         mean,cov_inv=uncertain_eval_net(mask_init,vertex_init)
                         mean=mean.cpu().numpy()
@@ -326,6 +309,9 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
             if t>0:
                 vals=[loss_seg,loss_vertex,loss_q,precision,recall]
                 for rec,val in zip(recs,vals): rec.update(val)
+        
+        data_counter+=1
+        
 
     proj_err_list = []
     add_list = []
@@ -333,39 +319,53 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
         proj_err,add,cm=evaluatorList[i].average_precision(False)
         proj_err_list.append(proj_err)
         add_list.append(add)
-        losses_seg[i] = losses_seg[i] / (iterations-1)
-        losses_vertex[i] = losses_vertex[i] / (iterations-1)
-        losses_q[i] = losses_q[i] / (iterations-1)
+        # losses_seg[i] = losses_seg[i] / (iterations-1)
+        # losses_vertex[i] = losses_vertex[i] / (iterations-1)
+        # losses_q[i] = losses_q[i] / (iterations-1)
+        # norm_q[i] = norm_q[i] / (iterations)
+        # norm_v[i] = norm_v[i] / (iterations)
         print(proj_err)
         print(add)
         print(losses_seg[i])
         print(losses_vertex[i])
         print(losses_q[i])
+        print(norm_q[i])
         print('\n')
 
     if val_prefix == 'val':         
-        fig = plt.figure(figsize=[15,8])
-        ax1 = plt.subplot(231)
+        fig = plt.figure(figsize=[20,4])
+        ax1 = plt.subplot(141)
         ax1.plot(add_list)
         ax1.set_title('ADD')
         ax1.grid()
-        ax2 = plt.subplot(232)
+        ax2 = plt.subplot(142)
         ax2.plot(proj_err_list)
         ax2.set_title('2D proj')
         ax2.grid()
-        ax3 = plt.subplot(233)
-        ax3.plot(losses_seg[1:-1])
-        ax3.set_title('loss_seg')
+        ax3 = plt.subplot(143)
+        ax3.plot(norm_q[1:])
+        ax3.set_title('norm q')
         ax3.grid()
-        ax4 = plt.subplot(234)
-        ax4.plot(losses_vertex[1:-1])
-        ax4.set_title('loss_vertex')
+        ax4 = plt.subplot(144)
+        ax4.plot(norm_v[1:])
+        ax4.set_title('|x-x^|')
         ax4.grid()
-        ax5 = plt.subplot(235)
-        ax5.plot(losses_q[1:-1])
-        ax5.set_title('loss_q')
-        ax5.grid()
-        plt.savefig('{}.png'.format(epoch))
+        plt.savefig('metrics_{}_{}.png'.format(epoch,exp))
+
+        fig = plt.figure(figsize=[15,4])
+        # ax3 = plt.subplot(121)
+        # ax3.plot(losses_seg[1:])
+        # ax3.set_title('loss_seg')
+        # ax3.grid()
+        ax1 = plt.subplot(132)
+        ax1.plot(losses_vertex[1:])
+        ax1.set_title('loss_vertex')
+        ax1.grid()
+        ax2 = plt.subplot(133)
+        ax2.plot(losses_q[1:])
+        ax2.set_title('loss_q')
+        ax2.grid()
+        plt.savefig('losses_{}_{}.png'.format(epoch,exp))
 
     with torch.no_grad():
         batch_size = image.shape[0]
@@ -521,6 +521,39 @@ def train_net():
 #     print(np.asarray(poses_pr).shape)
 #     np.save('assets/{}{}_pr.npy'.format(prefix,args.linemod_cls),np.asarray(poses_pr))
 #     np.save('assets/{}{}_gt.npy'.format(prefix,args.linemod_cls),np.asarray(poses_gt))
+
+def plot_results(image, rgb_pth, mask_init, mask_pth, vertex_init,t):
+    fnameM = '/home/gerard/masks/{}'.format(mask_pth[0]) 
+    fnameM = fnameM.replace(".jpg","_{}.jpg".format(t))
+    fnameM = fnameM.replace(".png","_{}.png".format(t))
+    maskOut = mask_init.squeeze(0).cpu().numpy()
+    imOut = image[0,:,:,:].permute(1,2,0).cpu().numpy()
+    imOut = ((imOut - imOut.min()) * (1/(imOut.max() - imOut.min()) * 255))
+    plt.figure()
+    plt.imshow(imOut.astype('uint8'))
+    plt.imshow(maskOut,cmap='jet',alpha=0.5)
+    print(fnameM)
+    plt.savefig(fnameM)                   
+    
+    fnameR = '/home/gerard/vfields/{}'.format(rgb_pth[0])
+    plt.figure()
+    plt.imshow(imOut.astype('uint8'))
+    step = 16
+    X,Y = np.meshgrid(np.arange(0,image.shape[3],step), np.arange(0,image.shape[2],step))
+    U = vertex_init[0,3,:,:].cpu().numpy()
+    U = ((U - U.min()) * (1/(U.max() - U.min())))
+    U = U[::step,::step]
+    V = vertex_init[0,2,:,:].cpu().numpy()
+    V = ((V - V.min()) * (1/(V.max() - V.min())))
+    V = V[::step,::step]
+    
+    plt.quiver(X,Y,U,V, scale=3, scale_units='inches', color='r')
+    plt.savefig(fnameR)
+    
+    fnameR = fnameR.replace(".jpg","_{}.jpg".format(t))
+    fnameR = fnameR.replace(".png","_{}.png".format(t))
+    print(fnameR)
+    plt.savefig(fnameR)  
 
 if __name__ == "__main__":
     train_net()
