@@ -274,8 +274,8 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
                         mask_init = mask
                         vertex_init = vertex_init - (delta*q_pred)
    
-                    if data_counter==1000:
-                        plot_results(image, rgb_pth, mask_init, mask_pth, vertex_init, t)
+                    # if data_counter==1000:
+                    #     plot_results(image, rgb_pth, mask_init, mask_pth, vertex_init, t)
                                                                                                     
                     if args.use_uncertainty_pnp:
                         mean,cov_inv=uncertain_eval_net(mask_init,vertex_init)
