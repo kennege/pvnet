@@ -100,19 +100,21 @@ class NetWrapper(nn.Module):
         # vertex_pred = est_pred[:,0:18,:,:]
     
         # loss_seg = self.criterionSeg(seg_pred, abs(mask_init-mask.float()).long())
-        loss_seg = self.criterionSeg(seg_pred, mask)
+        # loss_seg = self.criterionSeg(seg_pred, mask)
         # loss_seg_pred = self.criterionSeg(seg_in, mask)
-        loss_seg = torch.mean(loss_seg.view(loss_seg.shape[0],-1),1)
+        # loss_seg = torch.mean(loss_seg.view(loss_seg.shape[0],-1),1)
         # loss_seg_pred = torch.mean(loss_seg_pred.view(loss_seg_pred.shape[0],-1),1)
 
         # loss_seg = loss_seg + loss_seg_pred
-
-        loss_vertex = 100 * smooth_l1_loss(vertex_pred, vertex_init, vertex_weights, reduce=False)
+        # sign = torch.sign(vertex_weights * (q_pred - (vertex_init - vertex_pred)))
+        loss_vertex = smooth_l1_loss(vertex_pred, vertex_init, vertex_weights, reduce=False)
         loss_q = smooth_l1_loss(q_pred,(vertex_init-vertex), vertex_weights, reduce=False)
+        # print('loss_q: ',loss_q)
         precision, recall = compute_precision_recall(seg_pred, mask)
+        # q_pred = sign*q_pred
     
 
-        return seg_pred, vertex_pred, q_pred, loss_seg, loss_vertex, loss_q, precision, recall
+        return seg_pred, vertex_pred, q_pred, loss_vertex, loss_q, precision, recall
 
 class EvalWrapper(nn.Module):
     def forward(self, mask_pred, vertex_pred, use_argmax=True, use_uncertainty=False):
@@ -162,7 +164,7 @@ def train(net, PVNet, optimizer, dataloader, epoch):
 
         data_time.update(time.time()-end)
         with torch.no_grad():
-            _, vertex_init = PVNet(image)
+            seg_pred, vertex_init = PVNet(image)
             # mask_init=torch.unsqueeze(torch.argmax(seg_init,1),1).float()     
             # est_init = torch.cat([vertex_init, seg_init],1)
             # vertex_init = vertex
@@ -182,26 +184,25 @@ def train(net, PVNet, optimizer, dataloader, epoch):
         # vertex_init = vertex_init.float()
 
         # vertex_init = vertex
-        seg_pred, vertex_pred, q_pred, loss_seg, loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
+        _, vertex_pred, q_pred,  loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
         # vertex_pred = est_pred[:,0:18,:,:]
-        loss_seg, loss_vertex, loss_q, precision,recall=[torch.mean(val) for val in (loss_seg, loss_vertex, loss_q, precision, recall)]
-        loss = (loss_vertex) + loss_q #* train_cfg['vertex_loss_ratio']
-        vals=(loss_seg,loss_vertex,loss_q,precision,recall)
+        loss_vertex, loss_q, precision,recall=[torch.mean(val) for val in ( loss_vertex, loss_q, precision, recall)]
+        loss =  (10*loss_vertex) + loss_q #* train_cfg['vertex_loss_ratio']
+        vals=( loss_vertex,loss_q,precision,recall)
         for rec,val in zip(recs,vals): rec.update(val)
-
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-
         batch_time.update(time.time()-end)
         end=time.time()
 
         if idx % train_cfg['loss_rec_step'] == 0:
-            step = epoch * size + idx        # losses_seg[i] = losses_seg[i] / (iterations-1)
-        # losses_vertex[i] = losses_vertex[i] / (iterations-1)
-        # losses_q[i] = losses_q[i] / (iterations-1)
-        # norm_q[i] = norm_q[i] / (iterations)
-        # norm_v[i] = norm_v[i] / (iterations)
+            step = epoch * size + idx        
+            losses_batch=OrderedDict()
+            for name,rec in zip(recs_names,recs): losses_batch['train/'+name]=rec.avg
+            recorder.rec_loss_batch(losses_batch,step,epoch)
+            for rec in recs: rec.reset()
+
             data_time.reset()
             batch_time.reset()
 
@@ -226,6 +227,7 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
     else:
         iterations = 2
     evaluatorList = []
+    exp = train_cfg["eval_name"]
     losses_vertex = np.zeros(iterations)
     losses_seg = np.zeros(iterations)
     losses_q = np.zeros(iterations)
@@ -254,22 +256,22 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
             for t in range(iterations): # iterative evaluation
                 if t==0:
                     seg_pred, vertex_init = PVNet(image)
-                    mask_init= mask #torch.argmax(seg_init,1)
+                    mask_init = mask #torch.argmax(seg_init,1)
                 else:              
-                    seg_pred, vertex_pred, q_pred, loss_seg, loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
-                    loss_seg, loss_vertex, loss_q, precision, recall=[torch.mean(val) for val in (loss_seg, loss_vertex, loss_q, precision, recall)]
-                    losses_seg[t] = losses_seg[t] + loss_seg      
+                    _, vertex_pred, q_pred,  loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
+                    loss_vertex, loss_q, precision, recall=[torch.mean(val) for val in ( loss_vertex, loss_q, precision, recall)]
+                    # losses_seg[t] = losses_seg[t] + loss_seg      
                     losses_vertex[t] = losses_vertex[t] + loss_vertex
                     losses_q[t] = losses_q[t] + loss_q
-                    norm_q[t] = norm_q[t] + (1/torch.sum(vertex_weights).cpu().numpy())*(np.linalg.norm((vertex_weights* q_pred).cpu().numpy()))**2
-                    norm_v[t] = norm_v[t] +  (1/torch.sum(vertex_weights).cpu().numpy())*np.linalg.norm((vertex_weights * (vertex_init - vertex)).cpu().numpy())**2
+                    norm_q[t] = norm_q[t] + (1/torch.sum(vertex_weights).cpu().numpy())*(np.linalg.norm((vertex_weights * q_pred).cpu().numpy()))**2
+                    norm_v[t] = norm_v[t] + (1/torch.sum(vertex_weights).cpu().numpy())*np.linalg.norm((vertex_weights * (vertex_init - vertex)).cpu().numpy())**2
                 
                 if (train_cfg['eval_epoch']
                     and epoch%train_cfg['eval_inter']==0
                     and epoch>=train_cfg['eval_epoch_begin']) or args.test_model:
 
                     if t>0:
-                        exp = train_cfg["eval_name"]
+                        
                         delta = train_cfg["delta"]
                         mask_init = mask
                         vertex_init = vertex_init - (delta*q_pred)
@@ -299,15 +301,13 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
             if args.save_inter_result:
                 mask_pr = torch.argmax(seg_pred, 1).cpu().detach().numpy()
                 mask_gt = mask.cpu().detach().numpy()
-                # assume batch size = 1
-                imsave(os.path.join(args.save_inter_dir, '{}_mask_pr.png'.format(idx)), mask_pr[0])
-                imsave(os.path.join(args.save_inter_dir, '{}_mask_gt.png'.format(idx)), mask_gt[0])
+                # assume b3th.join(args.save_inter_dir, '{}_mask_gt.png'.format(idx)), mask_gt[0])
                 imsave(os.path.join(args.save_inter_dir, '{}_rgb.png'.format(idx)),
                     imagenet_to_uint8(image.cpu().detach().numpy()[0]))
                 save_pickle([pose_preds[0],pose[0]],os.path.join(args.save_inter_dir, '{}_pose.pkl'.format(idx)))
            
             if t>0:
-                vals=[loss_seg,loss_vertex,loss_q,precision,recall]
+                vals=[loss_vertex,loss_q,precision,recall]
                 for rec,val in zip(recs,vals): rec.update(val)
         
         data_counter+=1
@@ -326,7 +326,7 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
         # norm_v[i] = norm_v[i] / (iterations)
         print(proj_err)
         print(add)
-        print(losses_seg[i])
+        # print(losses_seg[i])
         print(losses_vertex[i])
         print(losses_q[i])
         print(norm_q[i])
@@ -389,7 +389,7 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
         writer.add_scalar('add',add,epoch)
         writer.add_scalar('vertex loss',loss_vertex, epoch)
         writer.add_scalar('q loss',loss_q, epoch)
-        writer.add_scalar('seg loss', loss_seg, epoch)
+        # writer.add_scalar('seg loss', loss_seg, epoch)
         writer.add_scalar('learning rate', lr, epoch)
 
     for rec in recs: rec.reset()
@@ -430,6 +430,8 @@ def train_net():
             image_db = LineModImageDB(args.linemod_cls,has_render_set=False,
                                       has_fuse_set=False)
             test_db = image_db.test_real_set+image_db.val_real_set
+            # lengths = [int(len(test_db)*train_cfg["dataset_fraction"]), int(len(test_db)*(1-train_cfg["dataset_fraction"])+1)]
+            # test_db, _ = torch.utils.data.dataset.random_split(test_db,lengths)
             test_set = LineModDatasetRealAug(test_db, cfg.LINEMOD, vote_type, augment=False, use_motion=motion_model)
             test_sampler = SequentialSampler(test_set)
             test_batch_sampler = ImageSizeBatchSampler(test_sampler, train_cfg['test_batch_size'], False)

@@ -3,21 +3,21 @@
 
   "network":"resnet18_8s",
   
-  "exp_name":"02052020",
-  "eval_name":"1000d_100i_fullmodel",
-  "delta":0.001,
-  "iterations":100,
+  "exp_name":"07052020",
+  "eval_name":"07052020",
+  "delta":0.01,
+  "iterations":20,
 
   "lr":1e-3,
   "lr_decay_rate":0.85,
-  "lr_decay_epoch":5,
-  "train_batch_size":20,
+  "lr_decay_epoch":10,
+  "train_batch_size":16,
   "test_batch_size":1,
   "motion_model":false,
 
   "resume":false,
   "finetune":false,
-  "epoch_num":200,
+  "epoch_num":50,
 
   "use_real_train":true,
   "use_multi_syn":false,
@@ -70,10 +70,10 @@
     "saturation":0.05,
     "hue":0.05,
 
-    "wmax":640,
-    "wmin":128,
-    "hmax":640,
-    "hmin":128,
+    "wmax":160,
+    "wmin":64,
+    "hmax":120,
+    "hmin":64,
     "size_int":8,
 
     "ignore_fuse_ms_vertex":false,
