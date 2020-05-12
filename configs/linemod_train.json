@@ -3,21 +3,21 @@
 
   "network":"resnet18_8s",
   
-  "exp_name":"07052020",
-  "eval_name":"07052020",
+  "exp_name":"tuesday",
+  "eval_name":"tuesday",
   "delta":0.01,
-  "iterations":20,
+  "iterations":100,
 
   "lr":1e-3,
   "lr_decay_rate":0.85,
   "lr_decay_epoch":10,
-  "train_batch_size":16,
+  "train_batch_size":64,
   "test_batch_size":1,
   "motion_model":false,
 
   "resume":false,
   "finetune":false,
-  "epoch_num":50,
+  "epoch_num":200,
 
   "use_real_train":true,
   "use_multi_syn":false,
