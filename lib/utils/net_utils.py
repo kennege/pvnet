@@ -101,7 +101,7 @@ def load_model(imNet, estNet, optim, model_dir, epoch=-1):
         pth = max(pths)
     else:
         pth = epoch
-    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(193)))
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(76)))
     # print(os.path.join(model_dir, '{}.pth'.format(pth)))
     imNet.load_state_dict(pretrained_model['imNet'])
     estNet.load_state_dict(pretrained_model['estNet'])
@@ -119,7 +119,7 @@ def load_net(net, model_dir):
         return 0
 
     pth = max(pths)
-    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(193)))
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(76)))
     # print(os.path.join(model_dir, '{}.pth'.format(pth)))
     net.load_state_dict(pretrained_model['net'])
     return pretrained_model['epoch'] + 1
@@ -366,3 +366,83 @@ def compute_precision_multi_class(scores,target,reduce=False):
         precision=torch.mean(precision)
 
     return precision
+
+def plot_mask_vfield(image, rgb_pth, mask_init, mask_pth, vertex_init,t):
+    fnameM = '/home/gerard/masks/{}'.format(mask_pth[0]) 
+    fnameM = fnameM.replace(".jpg","_{}.jpg".format(t))
+    fnameM = fnameM.replace(".png","_{}.png".format(t))
+    maskOut = mask_init.squeeze(0).cpu().numpy()
+    imOut = image[0,:,:,:].permute(1,2,0).cpu().numpy()
+    imOut = ((imOut - imOut.min()) * (1/(imOut.max() - imOut.min()) * 255))
+    plt.figure()
+    plt.imshow(imOut.astype('uint8'))
+    plt.imshow(maskOut,cmap='jet',alpha=0.5)
+    print(fnameM)
+    plt.savefig(fnameM)                   
+    
+    fnameR = '/home/gerard/vfields/{}'.format(rgb_pth[0])
+    plt.figure()
+    plt.imshow(imOut.astype('uint8'))
+    step = 16
+    X,Y = np.meshgrid(np.arange(0,image.shape[3],step), np.arange(0,image.shape[2],step))
+    U = vertex_init[0,3,:,:].cpu().numpy()
+    U = ((U - U.min()) * (1/(U.max() - U.min())))
+    U = U[::step,::step]
+    V = vertex_init[0,2,:,:].cpu().numpy()
+    V = ((V - V.min()) * (1/(V.max() - V.min())))
+    V = V[::step,::step]
+    
+    plt.quiver(X,Y,U,V, scale=3, scale_units='inches', color='r')
+    plt.savefig(fnameR)
+    
+    fnameR = fnameR.replace(".jpg","_{}.jpg".format(t))
+    fnameR = fnameR.replace(".png","_{}.png".format(t))
+    print(fnameR)
+    plt.savefig(fnameR)  
+
+
+# def perturb_gt_input():
+    # vertex_init = torch.from_numpy(np.zeros((image.shape[0],18,image.shape[2], image.shape[3])))
+    # for b in range(hcoords.shape[0]):  # for image in batch
+    #     # for i in range(hcoords[b].shape[0]): # for coordinate in hcoords
+    #         # hcoords[b][i,0:2]+=random.uniform(-0.1,0.1)*hcoords[b][i,0:2]
+    #     # print(mask[b,:,:].cpu().numpy().shape)
+    #     # print(hcoords[b,:,:].cpu().numpy())
+    #     v = ld.compute_vertex_hcoords(mask[b,:,:].cpu().numpy(),hcoords[b,:,:].cpu().numpy())
+    #     print(v)
+    #     v = torch.from_numpy(v)
+    #     v = v.permute(2,0,1)
+    #     vertex_init[b,:,:,:] = v
+    #     # print(vertex_init[b,:,:,:])
+    # vertex_init = vertex_init.float()
+    
+# def normalise_vector_field(vertex_init,vertex,vertex_weights):
+    # normalise batch of vector fields to [-1,1] so that all values maintain original sign
+    # batch_size = vertex_init.shape[0]
+    # vfields = vertex_init.shape[1]
+    # norm = []
+    # for im in range(batch_size):
+    #     v = 0
+    #     current_norm = 0
+    #     for vfield in range(int(vfields/2)): 
+            # b = torch.max(batch0[im,vfield,:,:])
+            # a = torch.min(batch0[im,vfield,:,:])
+            # if torch.abs(torch.min(batch[im,vfield,:,:])) > torch.max(batch[im,vfield,:,:]):
+            #     max_range_value = torch.abs(torch.min(batch[im,vfield,:,:]))
+            #     min_range_value = torch.min(batch[im,vfield,:,:])
+            # else:
+            #     max_range_value = torch.max(batch[im,vfield,:,:])
+            #     min_range_value = -torch.max(batch[im,vfield,:,:]) 
+            
+            # batch[im,vfield,:,:] = (b-a)*((batch[im,vfield,:,:] - min_range_value) / (max_range_value - min_range_value)) + a
+            # batch[im,vfield,:,:] = torch.from_numpy(batch[im,vfield,:,:].cpu().numpy() / np.linalg.norm(batch[im,vfield].cpu().numpy()))
+    #         current_norm = current_norm + ((1/torch.sum(vertex_weights[im,:,:,:]).cpu().numpy()) * \
+    #                     (np.linalg.norm((vertex_weights[im,:,:,:].cpu().numpy() * (vertex_init[im,v:v+2,:,:].cpu().numpy()- vertex[im,v:v+2,:,:].cpu().numpy())))**2))
+    #         v+=2
+    #     norm.append(current_norm)
+
+    # norm = np.array(norm)
+    # norm = torch.from_numpy(norm).float().cuda()
+
+    # norm = torch.mean(vertex_weights * torch.norm(vertex_init - vertex))
+    # return norm
