@@ -3,10 +3,12 @@
 
   "network":"resnet18_8s",
   
-  "exp_name":"wed",
-  "eval_name":"wed",
-  "delta":1,
-  "iterations":10,
+  "exp_name":"5_itr_d=03_q_gt_eval",
+  "sigma":0.3,
+  "train_iterations":4,
+
+  "delta":0.03, 
+  "eval_iterations":50, 
 
   "lr":1e-3,
   "lr_decay_rate":0.85,
@@ -15,7 +17,7 @@
   "test_batch_size":1,
   "motion_model":false,
 
-  "resume":true,
+  "resume":false,
   "finetune":false,
   "epoch_num":200,
 

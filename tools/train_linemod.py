@@ -1,6 +1,8 @@
 import sys
 import scipy.misc
 from tqdm import tqdm
+from datetime import date
+from pathlib import Path
 
 from skimage.io import imsave
 from tqdm import tqdm
@@ -74,9 +76,8 @@ ver_loss_rec = AverageMeter()
 precision_rec = AverageMeter()
 recall_rec = AverageMeter()
 q_loss_rec = AverageMeter()
-norm_loss_rec = AverageMeter()
 recs=[ver_loss_rec,q_loss_rec,  precision_rec,recall_rec]
-recs_names=['scalar/ver','scalar/q', 'scarlar/norm', 'scalar/precision','scalar/recall']
+recs_names=['scalar/ver','scalar/q', 'scalar/precision','scalar/recall']
 
 data_time = AverageMeter()
 batch_time = AverageMeter()
@@ -98,10 +99,8 @@ class NetWrapper(nn.Module):
         loss_vertex =  smooth_l1_loss(vertex_pred, vertex_init, vertex_weights, reduce=False)
         loss_q = smooth_l1_loss(q_pred,(vertex_init-vertex), vertex_weights, reduce=False)
         precision, recall = compute_precision_recall(seg_pred, mask)
-
-        loss_norm = torch.mean(vertex_weights * torch.norm(vertex_init - vertex))
     
-        return seg_pred, vertex_pred, q_pred, loss_vertex, loss_q, loss_norm, precision, recall
+        return seg_pred, vertex_pred, q_pred, loss_vertex, loss_q, precision, recall
 
 class EvalWrapper(nn.Module):
     def forward(self, mask_pred, vertex_pred, use_argmax=True, use_uncertainty=False):
@@ -143,8 +142,8 @@ def train(net, PVNet, optimizer, dataloader, epoch):
     size = len(dataloader)
     end=time.time()
 
-    iterations = train_cfg["iterations"]
-    delta = train_cfg["delta"]
+    iterations = train_cfg["train_iterations"]+1
+    sigma = train_cfg["sigma"]
 
     for idx, data in enumerate(dataloader):
         image, mask, vertex, vertex_weights,_,_,_,_ = [d for d in data]
@@ -157,35 +156,36 @@ def train(net, PVNet, optimizer, dataloader, epoch):
         with torch.no_grad():
             seg_pred, vertex_init = PVNet(image)
 
-        # for i in range(iterations):
-        _, vertex_pred, q_pred, loss_vertex, loss_q, loss_norm, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
-        loss_vertex, loss_q, loss_norm, precision,recall=[torch.mean(val) for val in ( loss_vertex, loss_q, loss_norm, precision, recall)]
-        loss =  (10 *loss_vertex) + loss_q + (loss_norm/1000) #* train_cfg['vertex_loss_ratio']
-        vals=( loss_vertex,loss_q, loss_norm, precision,recall)
-        for rec,val in zip(recs,vals): rec.update(val)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        batch_time.update(time.time()-end)
-        end=time.time()
+        for i in range(iterations):
+            _, vertex_pred, q_pred, loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
+            loss_vertex, loss_q, precision,recall=[torch.mean(val) for val in ( loss_vertex, loss_q, precision, recall)]
+            q_gt = vertex_init - vertex
+            loss =  (10 *loss_vertex) + loss_q  #* train_cfg['vertex_loss_ratio']
+            vals=( loss_vertex,loss_q, precision,recall)
+            for rec,val in zip(recs,vals): rec.update(val)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            batch_time.update(time.time()-end)
+            end=time.time()
 
-        if idx % train_cfg['loss_rec_step'] == 0:
-            step = epoch * size + idx        
-            losses_batch=OrderedDict()
-            for name,rec in zip(recs_names,recs): losses_batch['train/'+name]=rec.avg
-            recorder.rec_loss_batch(losses_batch,step,epoch)
-            for rec in recs: rec.reset()
+            if idx % train_cfg['loss_rec_step'] == 0:
+                step = epoch * size + idx        
+                losses_batch=OrderedDict()
+                for name,rec in zip(recs_names,recs): losses_batch['train/'+name]=rec.avg
+                recorder.rec_loss_batch(losses_batch,step,epoch)
+                for rec in recs: rec.reset()
 
-            data_time.reset()
-            batch_time.reset()
+                data_time.reset()
+                batch_time.reset()
 
-        if idx % train_cfg['img_rec_step'] == 0:
-            batch_size = image.shape[0]
-            nrow = 5 if batch_size > 5 else batch_size
-            recorder.rec_segmentation(F.softmax(seg_pred, dim=1), num_classes=2, nrow=nrow, step=step, name='train/image/seg')
-            recorder.rec_vertex(vertex_pred, vertex_weights, nrow=4, step=step, name='train/image/ver')
+            if idx % train_cfg['img_rec_step'] == 0:
+                batch_size = image.shape[0]
+                nrow = 5 if batch_size > 5 else batch_size
+                recorder.rec_segmentation(F.softmax(seg_pred, dim=1), num_classes=2, nrow=nrow, step=step, name='train/image/seg')
+                recorder.rec_vertex(vertex_pred, vertex_weights, nrow=4, step=step, name='train/image/ver')
 
-            # vertex_init = vertex_init - (delta*q_pred)
+            vertex_init = vertex_init - (sigma*q_gt)
 
     print('epoch {} training cost {} s'.format(epoch,time.time()-train_begin))
 
@@ -198,11 +198,10 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
     net.eval()
                
     if val_prefix=='val':
-        iterations = train_cfg["iterations"]
+        iterations = train_cfg["eval_iterations"]+1
     else:
         iterations = 2
     evaluatorList = []
-    exp = train_cfg["eval_name"]
     losses_vertex = np.zeros(iterations)
     losses_norm = np.zeros(iterations)
     losses_q = np.zeros(iterations)
@@ -234,12 +233,11 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
                     mask_init = mask #torch.argmax(seg_init,1)
                 else: 
                     # vertex_init = normalise_vector_field(vertex_init,vertex_init0)
-                    _, vertex_pred, q_pred,  loss_vertex, loss_q, loss_norm, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
-                    loss_vertex, loss_q, loss_norm, precision, recall=[torch.mean(val) for val in ( loss_vertex, loss_q, loss_norm, precision, recall)]
+                    _, vertex_pred, q_pred,  loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init.detach())
+                    loss_vertex, loss_q, precision, recall=[torch.mean(val) for val in ( loss_vertex, loss_q, precision, recall)]
                     # losses_seg[t] = losses_seg[t] + loss_seg      
                     losses_vertex[t] = losses_vertex[t] + loss_vertex
                     losses_q[t] = losses_q[t] + loss_q
-                    losses_norm[t] = losses_norm[t] + loss_norm
                     
                     norm_q[t] = norm_q[t] + ( (1/torch.sum(vertex_weights).cpu().numpy()) * \
                         (np.linalg.norm((vertex_weights * q_pred).cpu().numpy()))**2)
@@ -289,7 +287,7 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
                 save_pickle([pose_preds[0],pose[0]],os.path.join(args.save_inter_dir, '{}_pose.pkl'.format(idx)))
            
             if t>0:
-                vals=[loss_vertex,loss_q,loss_norm,precision,recall]
+                vals=[loss_vertex,loss_q,precision,recall]
                 for rec,val in zip(recs,vals): rec.update(val)
         
         data_counter+=1
@@ -300,53 +298,64 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
         proj_err,add,cm=evaluatorList[i].average_precision(False)
         proj_err_list.append(proj_err)
         add_list.append(add)
-        losses_norm[i] = losses_norm[i] / len(dataloader)
         losses_vertex[i] = losses_vertex[i] / len(dataloader)
         losses_q[i] = losses_q[i] / len(dataloader)
         norm_q[i] = norm_q[i] / len(dataloader)
         norm_v[i] = norm_v[i] / len(dataloader)
         print('proj: ',proj_err)
         print('add: ',add)
-        print('loss norm: ',losses_norm[i])
         print('loss vertex: ',losses_vertex[i])
         print('loss q: ',losses_q[i])
-        print('norm q:',norm_q[i])
+        print('norm q:' ,norm_q[i])
+        print('norm v: ',norm_v[i])
         print('\n')
 
-    if val_prefix == 'val':         
-        fig = plt.figure(figsize=[20,4])
-        ax1 = plt.subplot(141)
-        ax1.plot(add_list)
+    if val_prefix == 'val':   
+        distance = np.array(list(range(len(add_list)))) * train_cfg["delta"]
+        fig = plt.figure(figsize=[24,12])
+        ax1 = plt.subplot(241)
+        ax1.plot(distance,add_list)
+        ax1.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
         ax1.set_title('ADD')
+        ax1.set_xlabel(r"$\rho_E$")
         ax1.grid()
-        ax2 = plt.subplot(142)
-        ax2.plot(proj_err_list)
+        ax2 = plt.subplot(242)
+        ax2.plot(distance,proj_err_list)
         ax2.set_title('2D proj')
+        ax2.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
+        ax2.set_xlabel(r"$\rho_E$")
         ax2.grid()
-        ax3 = plt.subplot(143)
-        ax3.plot(norm_q[1:])
-        ax3.set_title('norm q')
+        ax3 = plt.subplot(243)
+        ax3.plot(distance[1:],norm_q[1:])
+        ax3.set_title(r'$||\hat{q}||$')
+        ax3.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
+        ax3.set_xlabel(r"$\rho_E$")
         ax3.grid()
-        ax4 = plt.subplot(144)
-        ax4.plot(norm_v[1:])
-        ax4.set_title('|x-x^|')
+        ax4 = plt.subplot(244)
+        ax4.plot(distance[1:],norm_v[1:])
+        ax4.set_title(r'$||x-\hat{x}||$')
+        ax4.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
+        ax4.set_xlabel(r"$\rho_E$")
         ax4.grid()
-        plt.savefig('metrics_{}_{}_{}.png'.format(epoch,exp,delta))
+        ax5 = plt.subplot(246)
+        ax5.plot(distance[1:],losses_vertex[1:]/losses_vertex[1])
+        ax5.set_title(r'$\mathcal{L}_X$')
+        ax5.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
+        ax5.set_xlabel(r"$\rho_E$")
+        ax5.grid()
+        ax6 = plt.subplot(247)
+        ax6.plot(distance[1:],losses_q[1:]/losses_q[1])
+        ax6.set_title(r'$\mathcal{L}_q$')
+        ax6.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
+        ax6.set_xlabel(r"$\rho_E$")
+        ax6.grid()
+        fig.suptitle(r"""Date: {}, Epoch: {} 
+            $T_T$ = {}, $\sigma$ = {}: $\rho_T$ = {}. 
+            $T_E$ = {}, $\delta$ = {}: $\rho_E$ = {}.""".format( \
+            date.today(),epoch,(train_cfg["train_iterations"]),train_cfg["sigma"],(train_cfg["train_iterations"])*train_cfg["sigma"],\
+            (train_cfg["eval_iterations"]),train_cfg["delta"],(train_cfg["eval_iterations"])*train_cfg["delta"]))
+        plt.savefig('{}/{}_{}_{}.png'.format(train_cfg["exp_name"],date.today(),epoch,train_cfg["delta"]))
 
-        fig = plt.figure(figsize=[15,4])
-        ax3 = plt.subplot(131)
-        ax3.plot(losses_norm[1:])
-        ax3.set_title('loss_norm')
-        ax3.grid()
-        ax1 = plt.subplot(132)
-        ax1.plot(losses_vertex[1:])
-        ax1.set_title('loss_vertex')
-        ax1.grid()
-        ax2 = plt.subplot(133)
-        ax2.plot(losses_q[1:])
-        ax2.set_title('loss_q')
-        ax2.grid()
-        plt.savefig('losses_{}_{}_{}.png'.format(epoch,exp,delta))
 
     with torch.no_grad():
         batch_size = image.shape[0]
@@ -370,7 +379,6 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
         writer.add_scalar('add',add,epoch)
         writer.add_scalar('vertex loss',loss_vertex, epoch)
         writer.add_scalar('q loss',loss_q, epoch)
-        writer.add_scalar('norm loss',loss_norm, epoch)
         # writer.add_scalar('seg loss', loss_seg, epoch)
         writer.add_scalar('learning rate', lr, epoch)
 
@@ -383,6 +391,8 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
 def train_net():
     tf_dir = './runs/' + train_cfg['exp_name']
     writer = SummaryWriter(log_dir=tf_dir)
+    Path("/home/gerard/myPvnet/pvnet/{}".format(train_cfg["exp_name"])).mkdir(parents=True, exist_ok=True)
+
 
     imNet=ImageUNet(ver_dim=(vote_num*2), seg_dim=2)
     estNet = EstimateUNet(ver_dim=(vote_num*2), seg_dim=2)
@@ -390,7 +400,7 @@ def train_net():
     net=DataParallel(net).cuda()
 
     # load original pvnet to perform forward pass to get initial estimate
-    PVModelDir='/home/gerard/199.pth'
+    PVModelDir='/home/gerard/ape_baseline/199.pth'
     PVNet=PVnet(ver_dim=vote_num*2, seg_dim=2)
     PVNet.load_state_dict(torch.load(PVModelDir)['net'])
     PVNet=DataParallel(PVNet).cuda()
@@ -507,20 +517,7 @@ def train_net():
             save_model(net.module.imNet, net.module.estNet, optimizer, epoch, model_dir)
             epoch_count+=1
 
-        fig = plt.figure()
-        ax = fig.gca(projection='3d')
-        print('add_list: ',add_list_list)
-        X = np.arange(0,len(add_list_list[0]),1)
-        Z = np.arange(0,epoch_count,1)
-        X,Z = np.meshgrid(X,Z)
-        Y = add_list_list
-        ax.set_xlabel("iterations")
-        ax.set_ylabel("add")
-        ax.set_zlabel('epoch')
-        surf = ax.plot_surface(X, Y, Z, cmap=cm.coolwarm,
-                       linewidth=0, antialiased=False)
-        plt.show()
-        plt.savefig('add_list_{}.png'.format(epoch,train_cfg["eval_name"]))
+        np.save("{}/add_list.npy".format(train_cfg["exp_name"]),add_list_list)
 
 if __name__ == "__main__":
     train_net()
