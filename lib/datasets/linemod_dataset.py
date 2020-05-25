@@ -57,7 +57,7 @@ def compute_vertex(mask, center_2d):
     vertex = center_2d[:, np.newaxis, :] - xy
     norm = np.linalg.norm(vertex, axis=2, keepdims=True)
     norm[norm<1e-3] += 1e-3
-    vertex = vertex / norm
+    vertex = vertex / np.maximum(1,norm)
 
     vertex_x = np.tile(mask, reps=[8, 1, 1]).astype(np.float32)
     vertex_x[:, xy[:, 1], xy[:, 0]] = vertex[..., 0]
@@ -76,7 +76,7 @@ def compute_vertex_hcoords(mask, hcoords, use_motion=False):
     if not use_motion:
         norm = np.linalg.norm(vertex, axis=2, keepdims=True)
         norm[norm<1e-3] += 1e-3
-        vertex = vertex / norm
+        vertex = vertex / np.maximum(1,norm)
 
     vertex_out=np.zeros([h,w,m,2],np.float32)
     vertex_out[xy[:, 1], xy[:, 0]] = vertex

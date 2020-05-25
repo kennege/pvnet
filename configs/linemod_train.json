@@ -3,7 +3,7 @@
 
   "network":"resnet18_8s",
   
-  "exp_name":"5_itr_d=03_q_gt_eval",
+  "exp_name":"change_unit_vectors_eval",
   "sigma":0.3,
   "train_iterations":4,
 
@@ -35,8 +35,8 @@
   "img_rec_step":160,
 
   "eval_epoch":true,
-  "eval_inter":1,
-  "eval_epoch_begin":0,
+  "eval_inter":5,
+  "eval_epoch_begin":120,
 
   "vote_type":"Farthest",
 

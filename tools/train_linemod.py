@@ -196,11 +196,18 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
     eval_net=DataParallel(EvalWrapper().cuda()) if not use_motion else DataParallel(MotionEvalWrapper().cuda())
     uncertain_eval_net=DataParallel(UncertaintyEvalWrapper().cuda())
     net.eval()
-               
+
+          
     if val_prefix=='val':
-        iterations = train_cfg["eval_iterations"]+1
+        if (train_cfg['eval_epoch']
+            and epoch%train_cfg['eval_inter']==0
+            and epoch>=train_cfg['eval_epoch_begin']) or args.test_model:    
+            iterations = train_cfg["eval_iterations"] + 1
+        else:    
+            iterations = train_cfg["train_iterations"]+2
     else:
         iterations = 2
+        
     evaluatorList = []
     losses_vertex = np.zeros(iterations)
     losses_norm = np.zeros(iterations)
@@ -244,10 +251,6 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
 
                     norm_v[t] = norm_v[t] + ((1/torch.sum(vertex_weights).cpu().numpy()) * \
                         (np.linalg.norm((vertex_weights.cpu().numpy() * (vertex_init.cpu().numpy()- vertex.cpu().numpy())))**2))
-
-                if (train_cfg['eval_epoch']
-                    and epoch%train_cfg['eval_inter']==0
-                    and epoch>=train_cfg['eval_epoch_begin']) or args.test_model:
 
                     if t>0:
                         
