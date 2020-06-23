@@ -5,6 +5,8 @@ import os
 from tensorboardX import SummaryWriter
 import torchvision.utils as vutils
 import numpy as np
+import matplotlib.pyplot as plt
+from datetime import date
 
 
 
@@ -101,7 +103,7 @@ def load_model(imNet, estNet, optim, model_dir, epoch=-1):
         pth = max(pths)
     else:
         pth = epoch
-    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(80)))
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
     # print(os.path.join(model_dir, '{}.pth'.format(pth)))
     imNet.load_state_dict(pretrained_model['imNet'])
     estNet.load_state_dict(pretrained_model['estNet'])
@@ -119,7 +121,7 @@ def load_net(net, model_dir):
         return 0
 
     pth = max(pths)
-    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(80)))
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
     # print(os.path.join(model_dir, '{}.pth'.format(pth)))
     net.load_state_dict(pretrained_model['net'])
     return pretrained_model['epoch'] + 1
@@ -399,6 +401,56 @@ def plot_mask_vfield(image, rgb_pth, mask_init, mask_pth, vertex_init,t):
     fnameR = fnameR.replace(".png","_{}.png".format(t))
     print(fnameR)
     plt.savefig(fnameR)  
+
+
+def compute_step_size(alpha, vertex, vertex_pred, vertex_weights, q_pred, train_cfg,t):
+    c1 = 0.0001
+    c2 = 0.9
+    maxItr = 100
+    eta = 1-(1/maxItr)
+    objectives = []
+    armijo = []
+    alphas = []
+    d_objectives = []
+    d_armijo = []
+    itr = 1
+    while True:
+        lhs_1 = 0.5*torch.norm(vertex_weights * (vertex - (vertex_pred + alpha*q_pred)))**2
+        rhs_1 = (0.5*torch.norm(vertex_weights * (vertex-vertex_pred))**2) - (c1*alpha*torch.norm(vertex_weights * (q_pred))**2)
+        lhs_2 = torch.norm(vertex_weights * (vertex - (vertex_pred + alpha*q_pred)),1)
+        rhs_2 = c2*torch.norm(vertex_weights * (vertex - vertex_pred),1)
+        # print(lhs_1)
+        # print(rhs_1)
+        # print(lhs_2)
+        # print(rhs_2)
+        # print('')
+
+        if (lhs_1 <= rhs_1) and (lhs_2 >= rhs_2):
+            break
+        if itr > maxItr:
+            alpha = 0.001
+            break
+        objectives.append(lhs_1)
+        armijo.append(rhs_1)
+        d_objectives.append(lhs_2)
+        d_armijo.append(rhs_2)
+        alphas.append(alpha)
+        alpha=eta*alpha
+        itr+=1
+    
+    # plt.figure(figsize=[12,6])
+    # ax1 = plt.subplot(121)
+    # ax1.plot(alphas,objectives,'b-',alphas,armijo,'r--')
+    # ax1.set_ylabel('objective')
+    # ax1.set_xlabel(r'$\alpha$')
+    # ax2 = plt.subplot(122)
+    # ax2.plot(alphas,d_objectives,'b-',alphas,d_armijo,'r--')
+    # ax2.set_xlabel(r'$\alpha$')
+    # ax2.set_ylabel('curvature')
+    # plt.savefig('{}/{}_{}_{}.png'.format(train_cfg["exp_name"],date.today(),train_cfg["delta"],t))
+    print('------------------------------------alpha: {}--itr: {}'.format(alpha,itr))          
+
+    return alpha
 
 
 # def perturb_gt_input():
