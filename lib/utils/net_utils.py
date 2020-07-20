@@ -7,6 +7,7 @@ import torchvision.utils as vutils
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import date
+import lib.datasets.linemod_dataset as ld
 
 
 
@@ -453,20 +454,18 @@ def compute_step_size(alpha, vertex, vertex_pred, vertex_weights, q_pred, train_
     return alpha
 
 
-# def perturb_gt_input():
-    # vertex_init = torch.from_numpy(np.zeros((image.shape[0],18,image.shape[2], image.shape[3])))
-    # for b in range(hcoords.shape[0]):  # for image in batch
-    #     # for i in range(hcoords[b].shape[0]): # for coordinate in hcoords
-    #         # hcoords[b][i,0:2]+=random.uniform(-0.1,0.1)*hcoords[b][i,0:2]
-    #     # print(mask[b,:,:].cpu().numpy().shape)
-    #     # print(hcoords[b,:,:].cpu().numpy())
-    #     v = ld.compute_vertex_hcoords(mask[b,:,:].cpu().numpy(),hcoords[b,:,:].cpu().numpy())
-    #     print(v)
-    #     v = torch.from_numpy(v)
-    #     v = v.permute(2,0,1)
-    #     vertex_init[b,:,:,:] = v
-    #     # print(vertex_init[b,:,:,:])
-    # vertex_init = vertex_init.float()
+def perturb_gt_input(vertex_init, hcoords, mask):
+    vertex_init_zeros = torch.zeros(vertex_init.shape)
+    vertex_init_pert = vertex_init_zeros
+    for b in range(hcoords.shape[0]):  # for image in batch
+        perturbation = torch.from_numpy((0.02 * np.random.random([9,2])) - 0.01)
+        hcoords[b,:,0:2] = hcoords[b,:,0:2].double() + perturbation.double()
+        v = ld.compute_vertex_hcoords(mask[b,:,:].cpu().numpy(),hcoords[b,:,:].cpu().numpy())
+        v = torch.from_numpy(v)
+        v = v.permute(2,0,1)
+        vertex_init_pert[b,:,:,:] = v
+    vertex_init_pert = vertex_init_pert.cuda()
+    return vertex_init_pert
     
 # def normalise_vector_field(vertex_init,vertex,vertex_weights):
     # normalise batch of vector fields to [-1,1] so that all values maintain original sign

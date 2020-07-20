@@ -3,8 +3,8 @@
 
   "network":"resnet18_8s",
   
-  "object":"duck",
-  "exp_name":"two_iterations_06",
+  "object":"ape",
+  "exp_name":"learn_denoising_gt_pv",
   "sigma":0.6,
   "train_iterations":2,
   "skips":1,
