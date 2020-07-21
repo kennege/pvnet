@@ -91,8 +91,7 @@ def conv(num_input, num_output, kernel_size, stride, padding, relu=True):
             nn.Conv2d(num_input, num_output, kernel_size, stride, padding),
             nn.ReLU(inplace=True)
         )
-
-
+        
 def load_model(imNet, estNet, optim, model_dir, epoch=-1):
     if not os.path.exists(model_dir):
         return 0
@@ -112,6 +111,56 @@ def load_model(imNet, estNet, optim, model_dir, epoch=-1):
     print('load model {} epoch {}'.format(model_dir,pretrained_model['epoch']))
     return pretrained_model['epoch'] + 1
 
+def load_model_estNet(estNet, optim, model_dir, epoch=-1):
+    if not os.path.exists(model_dir):
+        return 0
+
+    pths = [int(pth.split('.')[0]) for pth in os.listdir(model_dir)]
+    if len(pths) == 0:
+        return 0
+    if epoch==-1:
+        pth = max(pths)
+    else:
+        pth = epoch
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
+    estNet.load_state_dict(pretrained_model['estNet'])
+    optim.load_state_dict(pretrained_model['optim'])
+    print('load model {} epoch {}'.format(model_dir,pretrained_model['epoch']))
+    return pretrained_model['epoch'] + 1
+
+def load_pretrained_estNet(estNet, model_dir, epoch=-1):
+    if not os.path.exists(model_dir):
+        return 0
+
+    pths = [int(pth.split('.')[0]) for pth in os.listdir(model_dir)]
+    if len(pths) == 0:
+        return 0
+    if epoch==-1:
+        pth = max(pths)
+    else:
+        pth = epoch
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
+    estNet.load_state_dict(pretrained_model['estNet'])
+    print('load model {} epoch {}'.format(model_dir,pretrained_model['epoch']))
+    return pretrained_model['epoch'] + 1
+
+
+def load_model_imNet(imNet, optim, model_dir, epoch=-1):
+    if not os.path.exists(model_dir):
+        return 0
+
+    pths = [int(pth.split('.')[0]) for pth in os.listdir(model_dir)]
+    if len(pths) == 0:
+        return 0
+    if epoch==-1:
+        pth = max(pths)
+    else:
+        pth = epoch
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
+    estNet.load_state_dict(pretrained_model['imNet'])
+    optim.load_state_dict(pretrained_model['optim'])
+    print('load model {} epoch {}'.format(model_dir,pretrained_model['epoch']))
+    return pretrained_model['epoch'] + 1
 
 def load_net(net, model_dir):
     if not os.path.exists(model_dir):
@@ -123,10 +172,25 @@ def load_net(net, model_dir):
 
     pth = max(pths)
     pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
-    # print(os.path.join(model_dir, '{}.pth'.format(pth)))
     net.load_state_dict(pretrained_model['net'])
     return pretrained_model['epoch'] + 1
 
+
+def save_model_estNet(estNet, optim, epoch, model_dir):
+    os.system('mkdir -p {}'.format(model_dir))
+    torch.save({
+        'estNet': estNet.state_dict(),
+        'optim': optim.state_dict(),
+        'epoch': epoch
+    }, os.path.join(model_dir, '{}.pth'.format(epoch)))
+
+def save_model_imNet(imNet, optim, epoch, model_dir):
+    os.system('mkdir -p {}'.format(model_dir))
+    torch.save({
+        'imNet': imNet.state_dict(),
+        'optim': optim.state_dict(),
+        'epoch': epoch
+    }, os.path.join(model_dir, '{}.pth'.format(epoch)))    
 
 def save_model(imNet, estNet, optim, epoch, model_dir):
     os.system('mkdir -p {}'.format(model_dir))
@@ -136,7 +200,6 @@ def save_model(imNet, estNet, optim, epoch, model_dir):
         'optim': optim.state_dict(),
         'epoch': epoch
     }, os.path.join(model_dir, '{}.pth'.format(epoch)))
-
 
 class AverageMeter(EasyDict):
     """Computes and stores the average and current value"""
@@ -458,7 +521,7 @@ def perturb_gt_input(vertex_init, hcoords, mask):
     vertex_init_zeros = torch.zeros(vertex_init.shape)
     vertex_init_pert = vertex_init_zeros
     for b in range(hcoords.shape[0]):  # for image in batch
-        perturbation = torch.from_numpy((0.02 * np.random.random([9,2])) - 0.01)
+        perturbation = torch.from_numpy((0.2 * np.random.random([9,2])) - 0.1)
         hcoords[b,:,0:2] = hcoords[b,:,0:2].double() + perturbation.double()
         v = ld.compute_vertex_hcoords(mask[b,:,:].cpu().numpy(),hcoords[b,:,:].cpu().numpy())
         v = torch.from_numpy(v)

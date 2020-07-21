@@ -4,7 +4,7 @@
   "network":"resnet18_8s",
   
   "object":"ape",
-  "exp_name":"learn_denoising_gt_pv",
+  "exp_name":"split",
   "sigma":0.6,
   "train_iterations":2,
   "skips":1,

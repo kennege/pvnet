@@ -1,8 +1,0 @@
-initial estimate: pvnet forward pass
-lr_decay_rate: 0.85
-lr_decay_epoch: 20
-batch size: 24
-git message: "reading initial estimate from file and cropping by half"
-image cropping: after 100 epochs
-
-also include: .log file
