@@ -3,6 +3,7 @@ import scipy.misc
 from tqdm import tqdm
 from datetime import date
 from pathlib import Path
+import gc
 
 from skimage.io import imsave
 from tqdm import tqdm
@@ -27,7 +28,7 @@ import json
 
 from lib.utils.evaluation_utils import Evaluator
 from lib.utils.net_utils import AverageMeter, Recorder, smooth_l1_loss, \
-    load_model, save_model, adjust_learning_rate, compute_precision_recall, set_learning_rate, compute_step_size, perturb_gt_input
+    load_model, save_model, adjust_learning_rate, compute_precision_recall, set_learning_rate, compute_step_size, perturb_gt_input, load_pretrained_estNet
 from lib.utils.config import cfg
 
 from torch.nn import DataParallel
@@ -74,8 +75,8 @@ seg_loss_rec = AverageMeter()
 precision_rec = AverageMeter()
 recall_rec = AverageMeter()
 q_loss_rec = AverageMeter()
-recs=[q_loss_rec,  precision_rec,recall_rec]
-recs_names=[scalar/q', 'scalar/precision','scalar/recall']
+recs=[q_loss_rec, precision_rec, recall_rec]
+recs_names=['scalar/q', 'scalar/precision','scalar/recall']
 
 data_time = AverageMeter()
 batch_time = AverageMeter()
@@ -90,14 +91,22 @@ class NetWrapper(nn.Module):
         self.criterionSeg=nn.CrossEntropyLoss(reduce=False)
 
     def forward(self, image, mask, vertex, vertex_weights, vertex_init_pert, vertex_init):      
+        
+        self.estNet.eval()
+        _, x2s, x4s, x8s, xfc = self.estNet(vertex_weights.half() * vertex_init_pert.half())
+        seg_pred, q_pred = self.imNet(image, x2s.float(), x4s.float(), x8s.float(), xfc.float())
+        # x2s = None
+        # x4s = None
+        # x8s = None
+        # xfc = None
+        # vertex_init_pert = None
+        # torch.cuda.empty_cache()
+        # gc.collect()
 
-        vertex_pred, x2s, x4s, x8s, xfc = self.estNet(vertex_weights * vertex_init_pert)
-        seg_pred, q_pred = self.imNet(image, x2s, x4s, x8s, xfc)
-    
         loss_q = smooth_l1_loss(q_pred,(vertex_init-vertex), vertex_weights, reduce=False) #(1/torch.norm(vertex_init - vertex_pred)) * 
         precision, recall = compute_precision_recall(seg_pred, mask)
     
-        return seg_pred, vertex_pred, q_pred, loss_q, precision, recall
+        return seg_pred, _, q_pred, loss_q, precision, recall
 
 class EvalWrapper(nn.Module):
     def forward(self, mask_pred, vertex_pred, use_argmax=True, use_uncertainty=False):
@@ -142,31 +151,36 @@ def train(net, PVNet, optimizer, dataloader, epoch):
     iterations = train_cfg["train_iterations"]+1
     sigma = train_cfg["sigma"]
 
+    PVNet.eval()
     for idx, data in enumerate(dataloader):
         image, mask, vertex, vertex_weights,_,hcoords,_,_ = [d for d in data]
-        image = image.cuda()
-        mask = mask.cuda()
-        vertex = vertex.cuda()
-        vertex_weights = vertex_weights.cuda()        
+        # image = image.cuda()
+        im = image.half()
+        # mask = mask.cuda()
+        # vertex = vertex.cuda()
+        # vertex_weights = vertex_weights.cuda()        
         
         data_time.update(time.time()-end)
         with torch.no_grad():
-            seg_pred, vertex_init = PVNet(image)
+            _, vertex_init_out = PVNet(im)
+            vertex_init = vertex_init_out.cpu().float()
+            torch.cuda.empty_cache()
             
         vertex_init_pert = perturb_gt_input(vertex_init, hcoords, mask)
 
-        loss_total = 0               
         for i in range(iterations):
-            _, vertex_pred, q_pred, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init_pert.detach(), vertex.detach())
+            _, _, _, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init_pert.detach(), vertex.detach())
             loss_q, precision,recall=[torch.mean(val) for val in (loss_q, precision, recall)]
             q_gt = vertex_init - vertex
             loss = loss_q  
             vals=(loss_q, precision,recall)
-            for rec,val in zip(recs,vals): rec.update(val)
+            for rec,val in zip(recs,vals): rec.update(val) 
             optimizer.zero_grad()
-            # loss_total = loss_total + loss
             loss.backward()
             optimizer.step()
+            # del loss, image, mask, vertex, vertex_weights, loss_q, precision, recall, vals
+            # torch.cuda.empty_cache()
+            # gc.collect()
             batch_time.update(time.time()-end)
             end=time.time()
                        
@@ -180,11 +194,11 @@ def train(net, PVNet, optimizer, dataloader, epoch):
                 data_time.reset()
                 batch_time.reset()
 
-            if idx % train_cfg['img_rec_step'] == 0:
-                batch_size = image.shape[0]
-                nrow = 5 if batch_size > 5 else batch_size
-                recorder.rec_segmentation(F.softmax(seg_pred, dim=1), num_classes=2, nrow=nrow, step=step, name='train/image/seg')
-                recorder.rec_vertex(vertex_pred, vertex_weights, nrow=4, step=step, name='train/image/ver')
+            # if idx % train_cfg['img_rec_step'] == 0:
+            #     batch_size = image.shape[0]
+            #     nrow = 5 if batch_size > 5 else batch_size
+            #     recorder.rec_segmentation(F.softmax(seg_pred, dim=1), num_classes=2, nrow=nrow, step=step, name='train/image/seg')
+            #     recorder.rec_vertex(vertex_pred, vertex_weights, nrow=4, step=step, name='train/image/ver')
 
             # sigma = sigma_init * random.random() 
             # print('------------------------sigma:',sigma) 
@@ -389,7 +403,9 @@ def train_net():
     model_dir=os.path.join(cfg.MODEL_DIR,train_cfg['model_name'])
 
     imNet=ImageUNet(ver_dim=(vote_num*2), seg_dim=2)
-    estNet=load_pretrained_EstNet(EstimateUNet(ver_dim=(vote_num*2), seg_dim=2), model_dir)
+    estNet=load_pretrained_estNet(EstimateUNet(ver_dim=(vote_num*2), seg_dim=2), model_dir, epoch=25)
+    estNet = estNet.half()
+    estNet.eval()
 
     net=NetWrapper(imNet,estNet)
     net=DataParallel(net).cuda()
@@ -399,6 +415,7 @@ def train_net():
     PVNet=PVnet(ver_dim=vote_num*2, seg_dim=2)
     PVNet.load_state_dict(torch.load(PVModelDir)['net'])
     PVNet=DataParallel(PVNet).cuda()
+    PVNet = PVNet.half()
     PVNet.eval()
 
     optimizer = optim.Adam(net.parameters(), lr=train_cfg['lr'])
@@ -533,28 +550,6 @@ def train_net():
         print('ADD perc increase. mean: {} +/- {}, max: {}'.format(np.mean(p_inc_list),np.std(p_inc_list),np.max(p_inc_list)))
         print('X-X^ perc decrease. mean: {} +/- {}, max: {}'.format(np.mean(p_dec_v_list),np.std(p_dec_v_list),np.max(p_dec_v_list)))
         print('q-q^ perc decrease. mean: {} +/- {}, max: {}'.format(np.mean(p_dec_q_list),np.std(p_dec_q_list),np.max(p_dec_q_list)))
-        
-        # diff_ADD = np.subtract(np.array(first_a_list),np.array(largest_a_list))
-        # print('diff ADD: ',diff_ADD)
-        # sum_diff_ADD = np.sum(diff_ADD)
-        # print('sum diff ADD: ',sum_diff_ADD)
-        # square_diff_ADD = diff_ADD[0] ** 2
-        # print('square diff ADD: ',square_diff_ADD)
-        # sum_squared_diff_ADD = np.sum(square_diff_ADD)
-        # print('sum squared diff ADD: ',sum_squared_diff_ADD)
-        # N = float(len(first_a_list))
-        # print('N: ',N)
-        # t_ADD = (sum_diff_ADD/N)/np.sqrt((sum_squared_diff_ADD - ((sum_diff_ADD**2)/N))/(N*(N-1)))
-        
-        # diff_X = np.subtract(np.array(first_v_list) , np.array(smallest_v_list))
-        # sum_diff_X = np.sum(diff_X)
-        # square_diff_X = diff_X[0] ** 2
-        # sum_squared_diff_X = np.sum(square_diff_X)
-        # N = len(first_v_list)
-        # t_X = (sum_diff_X/N)/np.sqrt((sum_squared_diff_X - ((sum_diff_X**2)/N))/(N*(N-1)))
-        # print('ADD T-test: ',t_ADD)
-        # print('X-X^ T-test: ',t_X)
-        # np.save("{}/add_list.npy".format(train_cfg["exp_name"]),add_list_list)
 
 if __name__ == "__main__":
     train_net()

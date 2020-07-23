@@ -3,6 +3,7 @@ import scipy.misc
 from tqdm import tqdm
 from datetime import date
 from pathlib import Path
+import copy
 
 from skimage.io import imsave
 from tqdm import tqdm
@@ -27,7 +28,7 @@ import json
 
 from lib.utils.evaluation_utils import Evaluator
 from lib.utils.net_utils import AverageMeter, Recorder, smooth_l1_loss, \
-    load_model, save_model, adjust_learning_rate, compute_precision_recall, set_learning_rate, compute_step_size, perturb_gt_input
+    load_model, save_model, save_model_estNet, adjust_learning_rate, compute_precision_recall, set_learning_rate, compute_step_size, perturb_gt_input
 from lib.utils.config import cfg
 
 from torch.nn import DataParallel
@@ -86,7 +87,7 @@ class NetWrapper(nn.Module):
 
     def forward(self, image, mask, vertex, vertex_weights, vertex_init_pert, vertex_init):      
 
-        vertex_pred, x2s, x4s, x8s, xfc = self.estNet(vertex_weights * vertex_init_pert)   
+        vertex_pred, _, _, _, _ = self.estNet(vertex_weights * vertex_init_pert)   
         loss_vertex = smooth_l1_loss(vertex_pred, vertex_init, vertex_weights, reduce=False)
         return vertex_pred, loss_vertex
 
@@ -132,26 +133,30 @@ def train(net, PVNet, optimizer, dataloader, epoch):
 
     iterations = train_cfg["train_iterations"]+1
     sigma = train_cfg["sigma"]
-
+    
+    PVNet.eval()
     for idx, data in enumerate(dataloader):
         image, mask, vertex, vertex_weights,_,hcoords,_,_ = [d for d in data]
-        image = image.cuda()
-        mask = mask.cuda()
-        vertex = vertex.cuda()
-        vertex_weights = vertex_weights.cuda()        
+        # image = image.cuda()
+        # mask = mask.cuda()
+        # vertex = vertex.cuda()
+        # vertex_weights = vertex_weights.cuda()        
         
         data_time.update(time.time()-end)
         with torch.no_grad():
-            seg_pred, vertex_init = PVNet(image)
-            
+            _, vertex_init_out = PVNet(image)
+            # seg_pred = copy.deepcopy(seg_pred_out)
+            vertex_init = vertex_init_out.cpu()
+            torch.cuda.empty_cache()
+
         vertex_init_pert = perturb_gt_input(vertex_init, hcoords, mask)
 
-        loss_total = 0               
+        # loss_total = 0               
         for i in range(iterations):
-            vertex_pred, loss_vertex = net(image, mask, vertex, vertex_weights, vertex_init_pert.detach(), vertex.detach())
+            _, loss_vertex = net(image, mask, vertex, vertex_weights, vertex_init_pert.detach(), vertex.detach())
             loss_vertex = torch.mean(loss_vertex)
-            q_gt = vertex_init - vertex
-            loss = (loss_vertex)
+            q_gt = vertex_init - vertex            
+            loss = loss_vertex
             vals = loss_vertex
             recs[0].update(vals)
             optimizer.zero_grad()
@@ -167,16 +172,17 @@ def train(net, PVNet, optimizer, dataloader, epoch):
                 recorder.rec_loss_batch(losses_batch,step,epoch)
                 for rec in recs: rec.reset()
 
-                data_time.reset()
-                batch_time.reset()
+                # data_time.reset()
+                # batch_time.reset()
 
-            if idx % train_cfg['img_rec_step'] == 0:
-                batch_size = image.shape[0]
-                nrow = 5 if batch_size > 5 else batch_size
-                recorder.rec_segmentation(F.softmax(seg_pred, dim=1), num_classes=2, nrow=nrow, step=step, name='train/image/seg')
-                recorder.rec_vertex(vertex_pred, vertex_weights, nrow=4, step=step, name='train/image/ver')
+            # if idx % train_cfg['img_rec_step'] == 0:
+            #     batch_size = image.shape[0]
+            #     nrow = 5 if batch_size > 5 else batch_size
+                # recorder.rec_segmentation(F.softmax(seg_pred, dim=1), num_classes=2, nrow=nrow, step=step, name='train/image/seg')
+                # recorder.rec_vertex(vertex_pred, vertex_weights, nrow=4, step=step, name='train/image/ver')
 
             vertex_init = vertex_init - (sigma*q_gt)
+            # torch.cuda.empty_cache()
 
     print('epoch {} training cost {} s'.format(epoch,time.time()-train_begin))
 
@@ -218,7 +224,6 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
             vertex = vertex.cuda()
             vertex_weights = vertex_weights.cuda()
             pose = pose.cuda()
-            corner_target = corner_target
 
         with torch.no_grad():
             
@@ -283,6 +288,8 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
                         corners_end = corner_pred[np.newaxis,...]
                         visualize_bounding_box(image,corners_init,t,corners_targets=corners_end)
                     id+=1 
+
+                torch.cuda.empty_cache()
         
         data_counter+=1
     
@@ -322,55 +329,6 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
         print(train_cfg['exp_name'])
         print('add percentage increase ', p_increase_add)
         print('X-X^ percentage decrease: ',p_decrease_v)
-
-        # distance = np.array(list(range(len(add_list)))) * (train_cfg["delta"]*train_cfg["skips"])
-        # # distance = deltas
-        # print(add_list)
-        # print(norm_v)
-        # fig = plt.figure(figsize=[24,12])
-        # ax1 = plt.subplot(241)
-        # ax1.plot(distance,add_list)
-        # ax1.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
-        # ax1.set_title('ADD')
-        # ax1.set_xlabel(r"$\rho_E$")
-        # ax1.grid()
-        # ax2 = plt.subplot(242)
-        # ax2.plot(distance,proj_err_list)
-        # ax2.set_title('2D proj')
-        # ax2.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
-        # ax2.set_xlabel(r"$\rho_E$")
-        # ax2.grid()
-        # ax3 = plt.subplot(243)
-        # ax3.plot(distance[1:],norm_q[1:]/norm_q[1])
-        # ax3.set_title(r'$||q - \hat{q}||$')
-        # ax3.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
-        # ax3.set_xlabel(r"$\rho_E$")
-        # ax3.grid()
-        # ax4 = plt.subplot(244)
-        # ax4.plot(distance[1:],norm_v[1:]/norm_v[1])
-        # ax4.set_title(r'$||x-\hat{x}||$')
-        # ax4.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
-        # ax4.set_xlabel(r"$\rho_E$")
-        # ax4.grid()
-        # ax5 = plt.subplot(246)
-        # ax5.plot(distance[1:],losses_vertex[1:]/losses_vertex[1])
-        # ax5.set_title(r'$\mathcal{L}_X$')
-        # ax5.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
-        # ax5.set_xlabel(r"$\rho_E$")
-        # ax5.grid()
-        # ax6 = plt.subplot(247)
-        # ax6.plot(distance[1:],losses_q[1:]/losses_q[1])
-        # ax6.set_title(r'$\mathcal{L}_q$')
-        # ax6.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
-        # ax6.set_xlabel(r"$\rho_E$")
-        # ax6.grid()
-        # fig.suptitle(r"""Date: {}, Epoch: {} 
-        #     $T_T$ = {}, $\sigma$ = {}: $\rho_T$ = {}. 
-        #     $T_E$ = {}, $\delta$ = {}: $\rho_E$ = {}.""".format( \
-        #     date.today(),epoch,(train_cfg["train_iterations"]),train_cfg["sigma"],(train_cfg["train_iterations"])*train_cfg["sigma"],\
-        #     (train_cfg["eval_iterations"]),train_cfg["delta"],(train_cfg["eval_iterations"])*train_cfg["delta"]))
-        # plt.savefig('{}/{}_{}_{}.png'.format(train_cfg["exp_name"],date.today(),epoch,train_cfg["delta"]))
-
 
     with torch.no_grad():
         batch_size = image.shape[0]
@@ -532,7 +490,7 @@ def train_net():
                     largest_a_list.append(largest_a)
                     smallest_v_list.append(smallest_v)
             if args.linemod_cls in cfg.occ_linemod_cls_names:
-                _,_,_,_,_,_,_,_,_ = val(net, PVNet, occ_val_loader, epoch, lr, writer, 'occ_val',use_motion=motion_model)
+                _,_,_,_,_,_,_ = val(net, PVNet, occ_val_loader, epoch, lr, writer, 'occ_val',use_motion=motion_model)
 
             save_model_estNet(net.module.estNet, optimizer, epoch, model_dir)
             epoch_count+=1

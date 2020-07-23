@@ -3,6 +3,8 @@ import scipy.misc
 from tqdm import tqdm
 from datetime import date
 from pathlib import Path
+import gc
+import GPUtil
 
 from skimage.io import imsave
 from tqdm import tqdm
@@ -94,11 +96,18 @@ class NetWrapper(nn.Module):
 
         vertex_pred, x2s, x4s, x8s, xfc = self.estNet(vertex_weights * vertex_init_pert)
         seg_pred, q_pred = self.imNet(image, x2s, x4s, x8s, xfc)
-    
+        x2s = None
+        x4s = None
+        x8s = None
+        xfc = None
+        vertex_init_pert = None
+        torch.cuda.empty_cache()
+        gc.collect()
+
         loss_vertex = smooth_l1_loss(vertex_pred, vertex_init, vertex_weights, reduce=False)
         loss_q = smooth_l1_loss(q_pred,(vertex_init-vertex), vertex_weights, reduce=False) #(1/torch.norm(vertex_init - vertex_pred)) * 
+
         precision, recall = compute_precision_recall(seg_pred, mask)
-    
         return seg_pred, vertex_pred, q_pred, loss_vertex, loss_q, precision, recall
 
 class EvalWrapper(nn.Module):
@@ -141,36 +150,45 @@ def train(net, PVNet, optimizer, dataloader, epoch):
     size = len(dataloader)
     end=time.time()
 
-    iterations = train_cfg["train_iterations"]+1
+    iterations = train_cfg["train_iterations"]
     sigma = train_cfg["sigma"]
-
+    PVNet.eval()
     for idx, data in enumerate(dataloader):
-        image, mask, vertex, vertex_weights,_,hcoords,_,_ = [d for d in data]
-        image = image.cuda()
-        mask = mask.cuda()
-        vertex = vertex.cuda()
-        vertex_weights = vertex_weights.cuda()        
+        image, mask, vertex, vertex_weights,_,_,_,_ = [d for d in data]
+        # image = image.cuda()
+        im = image.half()
+        # mask = mask.cuda()
+        # vertex = vertex.cuda()
+        # vertex_weights = vertex_weights.cuda()        
         
         data_time.update(time.time()-end)
         with torch.no_grad():
-            seg_pred, vertex_init = PVNet(image)
-            
-        vertex_init_pert = vertex_init
+            _, vertex_init_out = PVNet(im)
+            vertex_init = vertex_init_out.cpu().float()
+            del vertex_init_out
+            torch.cuda.empty_cache()
+            gc.collect()
 
-        loss_total = 0               
         for i in range(iterations):
-            _, vertex_pred, q_pred, loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init_pert.detach(), vertex.detach())
-            print(loss_vertex)
+            _, _,_, loss_vertex, loss_q, precision, recall = net(image.detach(), mask.detach(), vertex.detach(), vertex_weights.detach(), vertex_init.detach(), vertex_init.detach())
             loss_vertex, loss_q, precision,recall=[torch.mean(val) for val in ( loss_vertex, loss_q, precision, recall)]
-            print(loss_vertex)
+
             q_gt = vertex_init - vertex
-            loss = (10 * loss_vertex) + loss_q  #* train_cfg['vertex_loss_ratio']
+            loss = ((10 * loss_vertex) + loss_q)  #* train_cfg['vertex_loss_ratio']            
             vals=( loss_vertex,loss_q, precision,recall)
+
             for rec,val in zip(recs,vals): rec.update(val)
+            del loss_q, loss_vertex, precision, recall, vals
+            gc.collect()            
+            torch.cuda.empty_cache()           
             optimizer.zero_grad()
             # loss_total = loss_total + loss
+            print("{} {}".format(epoch,idx))
             loss.backward()
             optimizer.step()
+            del loss, image, mask, vertex, vertex_weights
+            torch.cuda.empty_cache()
+            gc.collect()           
             batch_time.update(time.time()-end)
             end=time.time()
                        
@@ -184,21 +202,28 @@ def train(net, PVNet, optimizer, dataloader, epoch):
                 data_time.reset()
                 batch_time.reset()
 
-            if idx % train_cfg['img_rec_step'] == 0:
-                batch_size = image.shape[0]
-                nrow = 5 if batch_size > 5 else batch_size
-                recorder.rec_segmentation(F.softmax(seg_pred, dim=1), num_classes=2, nrow=nrow, step=step, name='train/image/seg')
-                recorder.rec_vertex(vertex_pred, vertex_weights, nrow=4, step=step, name='train/image/ver')
+            # if idx % train_cfg['img_rec_step'] == 0:
+            #     batch_size = image.shape[0]
+            #     nrow = 5 if batch_size > 5 else batch_size
+            #     recorder.rec_segmentation(F.softmax(seg_pred, dim=1), num_classes=2, nrow=nrow, step=step, name='train/image/seg')
+            #     recorder.rec_vertex(vertex_pred, vertex_weights, nrow=4, step=step, name='train/image/ver')
 
             # sigma = sigma_init * random.random() 
             # print('------------------------sigma:',sigma) 
-            vertex_init = vertex_init - (sigma*q_gt)
+            vertex_init = (vertex_init - (sigma*q_gt)).detach()         
+            torch.cuda.empty_cache()
+            gc.collect()
+
         # loss_total = loss_total / iterations
         # optimizer.zero_grad()
         # loss_total.backward()
         # optimizer.step()
+        del q_gt
+        torch.cuda.empty_cache()
+        gc.collect()
 
     print('epoch {} training cost {} s'.format(epoch,time.time()-train_begin))
+    
 
 def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_intrinsic=False, use_motion=False):
     for rec in recs: rec.reset()
@@ -235,11 +260,12 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
             image, mask, vertex, vertex_weights, pose, corner_target, Ks = [d.cuda() for d in data]
         else:
             image, mask, vertex, vertex_weights, pose, corner_target, mask_pth, rgb_pth = [d for d in data]
-            image = image.cuda()
-            mask = mask.cuda()
-            vertex = vertex.cuda()
-            vertex_weights = vertex_weights.cuda()
-            pose = pose.cuda()
+            # image = image.cuda()
+            # mask = mask.cuda()
+            # vertex = vertex.cuda()
+            # vertex_weights = vertex_weights.cuda()
+            # pose = pose.cuda()
+            im = image.half()
             corner_target = corner_target
 
         with torch.no_grad():
@@ -250,8 +276,9 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
             for t in range(iterations): 
                 if ((t % train_cfg["skips"]==0) or (t==0)):
                     if t==0:
-                        seg_pred, vertex_init = PVNet(image)
+                        seg_pred, vertex_init = PVNet(im)
                         mask_init = torch.argmax(seg_pred,1)
+                        vertex_init = vertex_init.cpu().float()
                     else: 
                         vertex_init_pert = vertex_init
                         _, vertex_pred, q_pred,  loss_vertex, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init_pert.detach(), vertex_init.detach())
@@ -271,7 +298,7 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
                             # mask_init = mask
                             # delta = compute_step_size(delta, vertex.detach(), vertex_init.detach(), vertex_weights.detach(), -q_pred.detach(), train_cfg,t)
                             deltas[id] = deltas[id] + delta
-                            vertex_init = vertex_init - (delta*q_pred)
+                            vertex_init = vertex_init - (delta*q_pred.cpu())
                             # vertex_init = normalise_vector_field(vertex_init,vertex_init0)
     
                         # if data_counter==1000:
@@ -474,6 +501,7 @@ def train_net():
     PVNet=PVnet(ver_dim=vote_num*2, seg_dim=2)
     PVNet.load_state_dict(torch.load(PVModelDir)['net'])
     PVNet=DataParallel(PVNet).cuda()
+    PVNet = PVNet.half()
     PVNet.eval()
 
 

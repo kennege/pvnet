@@ -1,4 +1,5 @@
 from torch import nn
+import gc
 import torch
 from torch.nn import functional as F
 from lib.networks.resnet import resnet18, resnet50, resnet34
@@ -161,7 +162,7 @@ class ImageDecoder(nn.Module):
 
         # x8s->128
         self.conv8s=nn.Sequential(
-            nn.Conv2d(768, s8dim, 3, 1, 1, bias=False),
+            nn.Conv2d(640, s8dim, 3, 1, 1, bias=False),
             nn.BatchNorm2d(s8dim),
             nn.LeakyReLU(0.1,True)
         )
@@ -194,14 +195,23 @@ class ImageDecoder(nn.Module):
 
     def forward(self, x, x2s, x4s, x8s, xfc, x2sEst, x4sEst, x8sEst, xfcEst):
 
-        fm=self.conv8s(torch.cat([xfcEst, xfc, x8s, x8sEst],1))
+        fm=self.conv8s(torch.cat([xfcEst, xfc, x8s],1))
         fm=self.up8sto4s(fm)
-
+        del xfc
+        del x8s
+        del xfcEst
+ 
         fm=self.conv4s(torch.cat([fm,x4s, x4sEst],1))
         fm=self.up4sto2s(fm)
+        del x4s
+        del x4sEst
 
         fm=self.conv2s(torch.cat([fm,x2s, x2sEst],1))
         fm=self.up2storaw(fm)
+        del x2s
+        del x2sEst
+        torch.cuda.empty_cache()
+        gc.collect()
 
         x=self.convraw(torch.cat([fm,x],1))
         seg_pred=x[:,:self.seg_dim,:,:]

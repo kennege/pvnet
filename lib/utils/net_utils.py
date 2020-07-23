@@ -1,4 +1,5 @@
 import torch
+import gc
 from torch import nn
 from easydict import EasyDict
 import os
@@ -66,13 +67,13 @@ def smooth_l1_loss(vertex_pred, vertex_targets, vertex_weights, sigma=1.0, norma
     '''
     b,ver_dim,_,_=vertex_pred.shape
     sigma_2 = sigma ** 2
-    vertex_diff = vertex_pred - vertex_targets
-    diff = vertex_weights * vertex_diff
-    abs_diff = torch.abs(diff)
+    # vertex_diff = vertex_pred - vertex_targets
+    # diff = vertex_weights * (vertex_pred - vertex_targets)
+    # abs_diff = torch.abs(vertex_weights * (vertex_pred - vertex_targets))
 
-    smoothL1_sign = (abs_diff < 1. / sigma_2).detach().float()
-    in_loss = torch.pow(diff, 2) * (sigma_2 / 2.) * smoothL1_sign \
-              + (abs_diff - (0.5 / sigma_2)) * (1. - smoothL1_sign)
+    smoothL1_sign = (torch.abs(vertex_weights.detach() * (vertex_pred.detach() - vertex_targets.detach())) < 1. / sigma_2).detach().float()
+    in_loss = torch.pow((vertex_weights.detach() * (vertex_pred - vertex_targets.detach())), 2) * (sigma_2 / 2.) * smoothL1_sign \
+              + (torch.abs(vertex_weights.detach() * (vertex_pred - vertex_targets.detach())) - (0.5 / sigma_2)) * (1. - smoothL1_sign)
 
     if normalize:
         in_loss=torch.sum(in_loss.view(b,-1),1) / (ver_dim * torch.sum(vertex_weights.view(b,-1),1) + 1e-3)
@@ -130,6 +131,7 @@ def load_model_estNet(estNet, optim, model_dir, epoch=-1):
 
 def load_pretrained_estNet(estNet, model_dir, epoch=-1):
     if not os.path.exists(model_dir):
+        print('model not found')
         return 0
 
     pths = [int(pth.split('.')[0]) for pth in os.listdir(model_dir)]
@@ -142,7 +144,7 @@ def load_pretrained_estNet(estNet, model_dir, epoch=-1):
     pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
     estNet.load_state_dict(pretrained_model['estNet'])
     print('load model {} epoch {}'.format(model_dir,pretrained_model['epoch']))
-    return pretrained_model['epoch'] + 1
+    return estNet
 
 
 def load_model_imNet(imNet, optim, model_dir, epoch=-1):
@@ -521,7 +523,7 @@ def perturb_gt_input(vertex_init, hcoords, mask):
     vertex_init_zeros = torch.zeros(vertex_init.shape)
     vertex_init_pert = vertex_init_zeros
     for b in range(hcoords.shape[0]):  # for image in batch
-        perturbation = torch.from_numpy((0.2 * np.random.random([9,2])) - 0.1)
+        perturbation = torch.from_numpy((0.02 * np.random.random([9,2])) - 0.01)
         hcoords[b,:,0:2] = hcoords[b,:,0:2].double() + perturbation.double()
         v = ld.compute_vertex_hcoords(mask[b,:,:].cpu().numpy(),hcoords[b,:,:].cpu().numpy())
         v = torch.from_numpy(v)
