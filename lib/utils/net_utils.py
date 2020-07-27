@@ -129,6 +129,23 @@ def load_model_estNet(estNet, optim, model_dir, epoch=-1):
     print('load model {} epoch {}'.format(model_dir,pretrained_model['epoch']))
     return pretrained_model['epoch'] + 1
 
+def load_model_imNet(imNet, optim, model_dir, epoch=-1):
+    if not os.path.exists(model_dir):
+        return 0
+
+    pths = [int(pth.split('.')[0]) for pth in os.listdir(model_dir)]
+    if len(pths) == 0:
+        return 0
+    if epoch==-1:
+        pth = max(pths)
+    else:
+        pth = epoch
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
+    imNet.load_state_dict(pretrained_model['imNet'])
+    optim.load_state_dict(pretrained_model['optim'])
+    print('load model {} epoch {}'.format(model_dir,pretrained_model['epoch']))
+    return pretrained_model['epoch'] + 1
+
 def load_pretrained_estNet(estNet, model_dir, epoch=-1):
     if not os.path.exists(model_dir):
         print('model not found')
@@ -146,9 +163,9 @@ def load_pretrained_estNet(estNet, model_dir, epoch=-1):
     print('load model {} epoch {}'.format(model_dir,pretrained_model['epoch']))
     return estNet
 
-
-def load_model_imNet(imNet, optim, model_dir, epoch=-1):
+def load_pretrained_imNet(imNet, model_dir, epoch=-1):
     if not os.path.exists(model_dir):
+        print('model not found')
         return 0
 
     pths = [int(pth.split('.')[0]) for pth in os.listdir(model_dir)]
@@ -159,10 +176,9 @@ def load_model_imNet(imNet, optim, model_dir, epoch=-1):
     else:
         pth = epoch
     pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
-    estNet.load_state_dict(pretrained_model['imNet'])
-    optim.load_state_dict(pretrained_model['optim'])
+    imNet.load_state_dict(pretrained_model['imNet'])
     print('load model {} epoch {}'.format(model_dir,pretrained_model['epoch']))
-    return pretrained_model['epoch'] + 1
+    return imNet
 
 def load_net(net, model_dir):
     if not os.path.exists(model_dir):

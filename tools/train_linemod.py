@@ -93,22 +93,22 @@ class NetWrapper(nn.Module):
         self.criterionSeg=nn.CrossEntropyLoss(reduce=False)
 
     def forward(self, image, mask, vertex, vertex_weights, vertex_init_pert, vertex_init):      
-
-        vertex_pred, x2s, x4s, x8s, xfc = self.estNet(vertex_weights * vertex_init_pert)
+        with torch.no_grad():
+            vertex_pred, x2s, x4s, x8s, xfc = self.estNet(vertex_weights * vertex_init_pert)
         seg_pred, q_pred = self.imNet(image, x2s, x4s, x8s, xfc)
-        x2s = None
-        x4s = None
-        x8s = None
-        xfc = None
-        vertex_init_pert = None
-        torch.cuda.empty_cache()
-        gc.collect()
+        # x2s = None
+        # x4s = None
+        # x8s = None
+        # xfc = None
+        # vertex_init_pert = None
+        # torch.cuda.empty_cache()
+        # gc.collect()
 
-        loss_vertex = smooth_l1_loss(vertex_pred, vertex_init, vertex_weights, reduce=False)
+        # loss_vertex = smooth_l1_loss(vertex_pred, vertex_init, vertex_weights, reduce=False)
         loss_q = smooth_l1_loss(q_pred,(vertex_init-vertex), vertex_weights, reduce=False) #(1/torch.norm(vertex_init - vertex_pred)) * 
 
         precision, recall = compute_precision_recall(seg_pred, mask)
-        return seg_pred, vertex_pred, q_pred, loss_vertex, loss_q, precision, recall
+        return seg_pred, vertex_pred, q_pred, loss_q, loss_q, precision, recall
 
 class EvalWrapper(nn.Module):
     def forward(self, mask_pred, vertex_pred, use_argmax=True, use_uncertainty=False):
@@ -174,21 +174,20 @@ def train(net, PVNet, optimizer, dataloader, epoch):
             loss_vertex, loss_q, precision,recall=[torch.mean(val) for val in ( loss_vertex, loss_q, precision, recall)]
 
             q_gt = vertex_init - vertex
-            loss = ((10 * loss_vertex) + loss_q)  #* train_cfg['vertex_loss_ratio']            
+            loss = loss_q #* train_cfg['vertex_loss_ratio']            
             vals=( loss_vertex,loss_q, precision,recall)
 
             for rec,val in zip(recs,vals): rec.update(val)
-            del loss_q, loss_vertex, precision, recall, vals
-            gc.collect()            
-            torch.cuda.empty_cache()           
+            # del loss_q, loss_vertex, precision, recall, vals
+            # gc.collect()            
+            # torch.cuda.empty_cache()           
             optimizer.zero_grad()
             # loss_total = loss_total + loss
-            print("{} {}".format(epoch,idx))
             loss.backward()
             optimizer.step()
-            del loss, image, mask, vertex, vertex_weights
-            torch.cuda.empty_cache()
-            gc.collect()           
+            # del loss, image, mask, vertex, vertex_weights
+            # torch.cuda.empty_cache()
+            # gc.collect()           
             batch_time.update(time.time()-end)
             end=time.time()
                        
@@ -218,9 +217,9 @@ def train(net, PVNet, optimizer, dataloader, epoch):
         # optimizer.zero_grad()
         # loss_total.backward()
         # optimizer.step()
-        del q_gt
-        torch.cuda.empty_cache()
-        gc.collect()
+        # del q_gt
+        # torch.cuda.empty_cache()
+        # gc.collect()
 
     print('epoch {} training cost {} s'.format(epoch,time.time()-train_begin))
     

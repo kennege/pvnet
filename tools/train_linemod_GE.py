@@ -28,7 +28,9 @@ import json
 
 from lib.utils.evaluation_utils import Evaluator
 from lib.utils.net_utils import AverageMeter, Recorder, smooth_l1_loss, \
-    load_model, save_model, adjust_learning_rate, compute_precision_recall, set_learning_rate, compute_step_size, perturb_gt_input, load_pretrained_estNet
+    load_model, save_model, adjust_learning_rate, compute_precision_recall, set_learning_rate,\
+         compute_step_size, perturb_gt_input, load_pretrained_estNet, load_model_estNet, load_model_imNet, \
+             save_model_estNet, save_model_imNet
 from lib.utils.config import cfg
 
 from torch.nn import DataParallel
@@ -84,17 +86,16 @@ recorder = Recorder(True,os.path.join(cfg.REC_DIR,train_cfg['model_name']),
                     os.path.join(cfg.REC_DIR,train_cfg['model_name']+'.log'))
 
 class NetWrapper(nn.Module):
-    def __init__(self,imNet,estNet):
+    def __init__(self,imNet):
         super(NetWrapper,self).__init__()
         self.imNet=imNet
-        self.estNet=estNet
         self.criterionSeg=nn.CrossEntropyLoss(reduce=False)
 
     def forward(self, image, mask, vertex, vertex_weights, vertex_init_pert, vertex_init):      
         
-        self.estNet.eval()
+        # self.estNet.eval()
         _, x2s, x4s, x8s, xfc = self.estNet(vertex_weights.half() * vertex_init_pert.half())
-        seg_pred, q_pred = self.imNet(image, x2s.float(), x4s.float(), x8s.float(), xfc.float())
+        seg_pred, q_pred = self.imNet(image, x2s, x4s, x8s, xfc)
         # x2s = None
         # x4s = None
         # x8s = None
@@ -106,7 +107,7 @@ class NetWrapper(nn.Module):
         loss_q = smooth_l1_loss(q_pred,(vertex_init-vertex), vertex_weights, reduce=False) #(1/torch.norm(vertex_init - vertex_pred)) * 
         precision, recall = compute_precision_recall(seg_pred, mask)
     
-        return seg_pred, _, q_pred, loss_q, precision, recall
+        return seg_pred, q_pred, loss_q, precision, recall
 
 class EvalWrapper(nn.Module):
     def forward(self, mask_pred, vertex_pred, use_argmax=True, use_uncertainty=False):
@@ -169,7 +170,7 @@ def train(net, PVNet, optimizer, dataloader, epoch):
         vertex_init_pert = perturb_gt_input(vertex_init, hcoords, mask)
 
         for i in range(iterations):
-            _, _, _, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init_pert.detach(), vertex.detach())
+            _, _, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init_pert.detach(), vertex.detach())
             loss_q, precision,recall=[torch.mean(val) for val in (loss_q, precision, recall)]
             q_gt = vertex_init - vertex
             loss = loss_q  
@@ -259,11 +260,13 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
             for t in range(iterations): 
                 if ((t % train_cfg["skips"]==0) or (t==0)):
                     if t==0:
-                        seg_pred, vertex_init = PVNet(image)
+                        seg_pred, vertex_init = PVNet(image.half())
                         mask_init = torch.argmax(seg_pred,1)
-                    else: 
                         vertex_init_pert = vertex_init
-                        _, vertex_pred, q_pred, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init_pert.detach(), vertex_init.detach())
+                        vertex_init = vertex_init.float()
+                        vertex_init_pert = vertex_init_pert.float()
+                    else:              
+                        _, q_pred, loss_q, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init_pert.detach(), vertex_init.detach())
                         loss_q, precision, recall=[torch.mean(val) for val in (loss_q, precision, recall)]
                         losses_q[id] = losses_q[id] + loss_q
                         
@@ -307,7 +310,7 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
                         save_pickle([pose_preds[0],pose[0]],os.path.join(args.save_inter_dir, '{}_pose.pkl'.format(idx)))
                 
                     if t>0:
-                        vals=[loss_vertex,loss_q,precision,recall]
+                        vals=[loss_q,precision,recall]
                         for rec,val in zip(recs,vals): rec.update(val)
 
                     if t==0:
@@ -403,11 +406,11 @@ def train_net():
     model_dir=os.path.join(cfg.MODEL_DIR,train_cfg['model_name'])
 
     imNet=ImageUNet(ver_dim=(vote_num*2), seg_dim=2)
-    estNet=load_pretrained_estNet(EstimateUNet(ver_dim=(vote_num*2), seg_dim=2), model_dir, epoch=25)
-    estNet = estNet.half()
-    estNet.eval()
+    # estNet=load_pretrained_estNet(EstimateUNet(ver_dim=(vote_num*2), seg_dim=2), model_dir, epoch=25)
+    # estNet = estNet.half()
+    # estNet.eval()
 
-    net=NetWrapper(imNet,estNet)
+    net=NetWrapper(imNet)
     net=DataParallel(net).cuda()
 
     # load original pvnet to perform forward pass to get initial estimate
@@ -426,7 +429,7 @@ def train_net():
         lr = param_group['lr']
 
     if args.test_model:
-        begin_epoch=load_model(net.module.imNet, net.module.estNet, optimizer, model_dir, args.load_epoch)
+        begin_epoch=load_model_imNet(net.module.imNet, optimizer, model_dir, args.load_epoch)
         
         if args.normal:
             print('testing normal linemod ...') 
@@ -539,7 +542,7 @@ def train_net():
             if args.linemod_cls in cfg.occ_linemod_cls_names:
                 _,_,_,_,_,_,_,_,_ = val(net, PVNet, occ_val_loader, epoch, lr, writer, 'occ_val',use_motion=motion_model)
 
-            save_model(net.module.imNet, net.module.estNet, optimizer, epoch, model_dir)
+            save_model_imNet(net.module.imNet, optimizer, epoch, model_dir)
             epoch_count+=1
         
         

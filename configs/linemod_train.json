@@ -1,12 +1,12 @@
 {
-  "model_name":"linemod_train_AE",
+  "model_name":"linemod_train_GE",
 
   "network":"resnet18_8s",
   
   "object":"ape",
-  "exp_name":"AE",
+  "exp_name":"GE",
   "sigma":0.6,
-  "train_iterations":1,
+  "train_iterations":2,
   "skips":1,
 
   "delta":0.6, 
