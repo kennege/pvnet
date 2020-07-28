@@ -407,7 +407,6 @@ def train_net():
 
     imNet=ImageUNet(ver_dim=(vote_num*2), seg_dim=2)
     # estNet=load_pretrained_estNet(EstimateUNet(ver_dim=(vote_num*2), seg_dim=2), model_dir, epoch=25)
-    # estNet = estNet.half()
     # estNet.eval()
 
     net=NetWrapper(imNet)

@@ -289,7 +289,6 @@ class EstimateUNet(nn.Module):
         self.estimateDecoder = EstimateDecoder(ver_dim, seg_dim, fcdim, s8dim, s4dim, s2dim, raw_dim)
 
     def forward(self, vertexEst):
-        # with torch.no_grad():
         x2sEst, x4sEst, x8sEst, xfcEst = self.estimateEncoder(vertexEst)
         # with torch.no_grad():
         ver_pred, x2s, x4s, x8s = self.estimateDecoder(vertexEst, x2sEst, x4sEst, x8sEst, xfcEst)

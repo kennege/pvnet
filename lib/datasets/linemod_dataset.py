@@ -272,7 +272,7 @@ class LineModDatasetRealAug(Dataset):
         if self.use_intrinsic:
             return rgb, mask, ver, ver_weight, pose, hcoords, K
         else:
-            return rgb, mask, ver, ver_weight, pose, hcoords, self.imagedb[index]['dpt_pth'], self.imagedb[index]['rgb_pth']
+            return rgb, mask, ver, ver_weight, pose, hcoords
 
 
     def __len__(self):
