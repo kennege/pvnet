@@ -12,10 +12,12 @@
   "delta":0.6, 
   "eval_iterations":4, 
 
+  "crop_factor":2,
+
   "lr":1e-3,
   "lr_decay_rate":0.85,
   "lr_decay_epoch":10,
-  "train_batch_size":32,
+  "train_batch_size":64,
   "test_batch_size":1,
   "motion_model":false,
 
@@ -74,10 +76,10 @@
     "saturation":0.05,
     "hue":0.05,
 
-    "wmax":640,
-    "wmin":256,
-    "hmax":480,
-    "hmin":256,
+    "wmax":360,
+    "wmin":128,
+    "hmax":360,
+    "hmin":128,
     "size_int":8,
 
     "ignore_fuse_ms_vertex":false,

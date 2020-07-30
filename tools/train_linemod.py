@@ -20,7 +20,7 @@ sys.path.append('..')
 from lib.ransac_voting_gpu_layer.ransac_voting_gpu import ransac_voting_layer_v3, \
     estimate_voting_distribution_with_mean, ransac_voting_layer_v5, ransac_motion_voting
 from lib.networks.model_repository import *
-from lib.datasets.linemod_dataset import LineModDatasetRealAug, ImageSizeBatchSampler, VotingType
+from lib.datasets.linemod_dataset import LineModDatasetRealAug, ImageSizeBatchSampler, VotingType, RandomScaleCrop
 from lib.utils.data_utils import LineModImageDB, OcclusionLineModImageDB, TruncatedLineModImageDB
 from lib.utils.arg_utils import args
 from lib.utils.draw_utils import visualize_bounding_box, imagenet_to_uint8, visualize_mask, visualize_points, img_pts_to_pts_img
@@ -92,38 +92,38 @@ recorder = Recorder(True,os.path.join(cfg.REC_DIR,train_cfg['model_name']),
                     os.path.join(cfg.REC_DIR,train_cfg['model_name']+'.log'))
 
 class NetWrapper(nn.Module):
-    def __init__(self,imNet, estNet, rank):
+    def __init__(self,imNet, estNet):
         super(NetWrapper,self).__init__()
         self.imNet=imNet
         self.estNet=estNet
-        self.rank=rank
-        self.criterionSeg=nn.CrossEntropyLoss(reduce=False).cuda(self.rank)
+        # self.rank=rank
+        self.criterionSeg=nn.CrossEntropyLoss(reduce=False)
 
     def forward(self, image, mask, vertex, vertex_weights, vertex_init_pert, vertex_init):      
         
-        if train_cfg['exp_name'] == 'GE_ape':
-            with torch.no_grad():
-                vertex_pred, x2s, x4s, x8s, xfc = self.estNet(vertex_weights * vertex_init_pert)
-            seg_pred, q_pred = self.imNet(image, x2s, x4s, x8s, xfc)
+        # if train_cfg['exp_name'] == 'GE_ape':
+        #     with torch.no_grad():
+            # vertex_pred, x2s, x4s, x8s, xfc = self.estNet(vertex_weights * vertex_init_pert)
+            # seg_pred, q_pred = self.imNet(image, x2s, x4s, x8s, xfc)
 
-            loss_q = smooth_l1_loss(q_pred,(vertex_init-vertex), vertex_weights, reduce=False) 
-            loss = loss_q
+            # loss_q = smooth_l1_loss(q_pred,(vertex_init-vertex), vertex_weights, reduce=False) 
+            # loss = loss_q
         
-        elif train_cfg['exp_name'] == 'AE_ape':
-            vertex_pred, x2s, x4s, x8s, xfc = self.estNet(vertex_weights * vertex_init_pert)
-            with torch.no_grad():
-                seg_pred, q_pred = self.imNet(image, x2s, x4s, x8s, xfc)
+        # elif train_cfg['exp_name'] == 'AE_ape':
+            # vertex_pred, x2s, x4s, x8s, xfc = self.estNet(vertex_weights * vertex_init_pert)
+            # with torch.no_grad():
+            # seg_pred, q_pred = self.imNet(image, x2s, x4s, x8s, xfc)
 
-            loss_vertex = smooth_l1_loss(vertex_pred, vertex_init, vertex_weights, reduce=False)
-            loss = loss_vertex
+            # loss_vertex = smooth_l1_loss(vertex_pred, vertex_init, vertex_weights, reduce=False)
+            # loss = loss_vertex 
 
-        elif train_cfg['exp_name'] == 'AE_GE_ape':
-            vertex_pred, x2s, x4s, x8s, xfc = self.estNet(vertex_weights * vertex_init_pert)
-            seg_pred, q_pred = self.imNet(image, x2s, x4s, x8s, xfc)
+        # elif train_cfg['exp_name'] == 'AE_GE_ape':
+        vertex_pred, x2s, x4s, x8s, xfc = self.estNet(vertex_weights * vertex_init_pert)
+        seg_pred, q_pred = self.imNet(image, x2s, x4s, x8s, xfc)
 
-            loss_q = smooth_l1_loss(q_pred,(vertex_init-vertex), vertex_weights, reduce=False) 
-            loss_vertex = smooth_l1_loss(vertex_pred, vertex_init, vertex_weights, reduce=False)
-            loss = (10*loss_vertex) + loss_q
+        loss_q = smooth_l1_loss(q_pred,(vertex_init-vertex), vertex_weights, reduce=False) 
+        loss_vertex = smooth_l1_loss(vertex_pred, vertex_init, vertex_weights, reduce=False)
+        loss = (10*loss_vertex) + loss_q
           
         precision, recall = compute_precision_recall(seg_pred, mask)
         return seg_pred, vertex_pred, q_pred, loss, precision, recall
@@ -157,7 +157,7 @@ class UncertaintyEvalWrapper(nn.Module):
         mean, var=estimate_voting_distribution_with_mean(mask_pred,vertex_pred,mean)
         return mean, var
 
-def train(net, PVNet, optimizer, dataloader, epoch, rank):
+def train(net, PVNet, optimizer, dataloader, epoch):
     for rec in recs: rec.reset()
     data_time.reset()
     batch_time.reset()
@@ -172,7 +172,7 @@ def train(net, PVNet, optimizer, dataloader, epoch, rank):
     sigma = train_cfg["sigma"]
     PVNet.eval()
     for idx, data in enumerate(dataloader):
-        image, mask, vertex, vertex_weights,_,_ = [d.cuda(rank) for d in data]
+        image, mask, vertex, vertex_weights,_,hcoords = [d.cuda() for d in data]
         # image = image.cuda()
         im = image
         # mask = mask.cuda()
@@ -183,12 +183,14 @@ def train(net, PVNet, optimizer, dataloader, epoch, rank):
         with torch.no_grad():
             _, vertex_init_out = PVNet(im)
             vertex_init = vertex_init_out.float()
-            del vertex_init_out
-            torch.cuda.empty_cache()
-            gc.collect()
+            # del vertex_init_out
+            # torch.cuda.empty_cache()
+            # gc.collect()
+
+            vertex_init_pert = perturb_gt_input(vertex_init, hcoords, mask)
 
         for i in range(iterations):
-            _, _,_, loss, precision, recall = net(image.detach(), mask.detach(), vertex.detach(), vertex_weights.detach(), vertex_init.detach(), vertex_init.detach())
+            _, _,_, loss, precision, recall = net(image.detach(), mask.detach(), vertex.detach(), vertex_weights.detach(), vertex_init_pert.detach(), vertex_init.detach())
             loss, precision,recall=[torch.mean(val) for val in (loss, precision, recall)]
 
             q_gt = vertex_init - vertex
@@ -480,20 +482,27 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
 
     return add_list, first_a, first_v, largest_a, smallest_v, smallest_q, p_increase_add, p_decrease_v, p_decrease_q
 
-def setup(rank, world_size):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '54930'
+# def setup(rank, world_size):
+#     os.environ['MASTER_ADDR'] = 'localhost'
+#     os.environ['MASTER_PORT'] = '54930'
 
-    # initialize the process group
-    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
-    # On each node
-    local_rank = int(rank)
-    device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
-    torch.cuda.set_device(local_rank)
+#     # initialize the process group
+#     dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+#     # On each node
+#     local_rank = int(rank)
+#     device = torch.device(f'cuda:{local_rank}')  # Unique only on individual node.
+#     torch.cuda.set_device(local_rank)
 
-def demo_basic(rank, world_size):
-    print(f"Running basic DDP example on rank {rank}.")
-    setup(rank, world_size)
+# def demo_basic(rank, world_size):
+#     # print(f"Running basic DDP example on rank {rank}.")
+#     # setup(rank, world_size)
+    
+
+def train_net():
+    #  mp.spawn(demo_basic,
+    #             args=(4,),
+    #             nprocs=4,
+    #             join=True)
     
     tf_dir = './runs/' + train_cfg['exp_name']
     writer = SummaryWriter(log_dir=tf_dir)
@@ -502,27 +511,33 @@ def demo_basic(rank, world_size):
 
     imNet=ImageUNet(ver_dim=(vote_num*2), seg_dim=2)
     estNet = EstimateUNet(ver_dim=(vote_num*2), seg_dim=2)
-    if train_cfg['exp_name'] == 'AE_ape':
-        model_Dir=os.path.join(cfg.MODEL_DIR,'ape_linemod_train_GE')
-        imNet=load_pretrained_imNet(ImageUNet(ver_dim=(vote_num*2), seg_dim=2), model_Dir, epoch=0)
-    elif train_cfg['exp_name'] == 'GE_ape':
-        model_Dir=os.path.join(cfg.MODEL_DIR,'ape_linemod_train_AE')
-        # estNet=load_pretrained_estNet(EstimateUNet(ver_dim=(vote_num*2), seg_dim=2), model_Dir, epoch=25)
-    elif train_cfg['exp_name'] == 'AE_GE_ape':
-        model_Dir=os.path.join(cfg.MODEL_DIR,'ape_linemod_train_GE')
-        imNet=load_pretrained_imNet(ImageUNet(ver_dim=(vote_num*2), seg_dim=2), model_Dir, epoch=0)
-        model_Dir=os.path.join(cfg.MODEL_DIR,'ape_linemod_train_AE')
-        estNet=load_pretrained_estNet(EstimateUNet(ver_dim=(vote_num*2), seg_dim=2), model_Dir, epoch=25)
+    net=NetWrapper(imNet,estNet)
+    net=DataParallel(net).cuda()
 
-    net=NetWrapper(imNet,estNet,rank).to(rank)
-    net=DistributedDataParallel(net, device_ids=[rank], find_unused_parameters=True)
+    # if train_cfg['exp_name'] == 'AE_ape':
+    #     model_Dir=os.path.join(cfg.MODEL_DIR,'ape_linemod_train_GE')
+    #     imNet=load_pretrained_imNet(ImageUNet(ver_dim=(vote_num*2), seg_dim=2), model_Dir, epoch=0)
+    # elif train_cfg['exp_name'] == 'GE_ape':
+    #     model_Dir=os.path.join(cfg.MODEL_DIR,'ape_linemod_train_AE')
+    #     # estNet=load_pretrained_estNet(EstimateUNet(ver_dim=(vote_num*2), seg_dim=2), model_Dir, epoch=25)
+    # elif train_cfg['exp_name'] == 'AE_GE_ape':
+    #     model_Dir=os.path.join(cfg.MODEL_DIR,'ape_linemod_train_GE')
+    #     imNet=load_pretrained_imNet(ImageUNet(ver_dim=(vote_num*2), seg_dim=2), model_Dir, epoch=0)
+    #     model_Dir=os.path.join(cfg.MODEL_DIR,'ape_linemod_train_AE')
+    #     estNet=load_pretrained_estNet(EstimateUNet(ver_dim=(vote_num*2), seg_dim=2), model_Dir, epoch=25)
+    # net=NetWrapper(imNet,estNet,rank).to(rank)
+    # net=DistributedDataParallel(net, device_ids=[rank], find_unused_parameters=True)
 
     # load original pvnet to perform forward pass to get initial estimate
     PVModelDir='/home/gerard/baseline_models/{}_baseline/199.pth'.format(train_cfg['object'])
     PVNet=PVnet(ver_dim=vote_num*2, seg_dim=2)
     PVNet.load_state_dict(torch.load(PVModelDir)['net'])
-    PVNet = PVNet.cuda(rank)
-    PVNet=DistributedDataParallel(PVNet, device_ids=[rank])
+    # PVNet = PVNet.cuda(rank)
+    # PVNet=DistributedDataParallel(PVNet, device_ids=[rank])
+    PVNet = DataParallel(PVNet).cuda()
+    
+    randomCropping = RandomScaleCrop()
+    
 
     optimizer = optim.Adam(net.parameters(), lr=train_cfg['lr'])
     motion_model=train_cfg['motion_model']
@@ -539,7 +554,7 @@ def demo_basic(rank, world_size):
             image_db = LineModImageDB(args.linemod_cls,has_render_set=False,
                                       has_fuse_set=False)
             test_db = image_db.test_real_set+image_db.val_real_set
-            test_set = LineModDatasetRealAug(test_db, cfg.LINEMOD, vote_type, augment=False, use_motion=motion_model)
+            test_set = LineModDatasetRealAug(test_db, randomCropping, cfg.LINEMOD, vote_type, augment=False, use_motion=motion_model)
             test_sampler = SequentialSampler(test_set)
             test_batch_sampler = ImageSizeBatchSampler(test_sampler, train_cfg['test_batch_size'], False)
             test_loader = DataLoader(test_set, batch_sampler=test_batch_sampler, num_workers=0)
@@ -551,7 +566,7 @@ def demo_basic(rank, world_size):
             print('testing occluded linemod ...')
             occ_image_db = OcclusionLineModImageDB(args.linemod_cls)
             occ_test_db = occ_image_db.test_real_set
-            occ_test_set = LineModDatasetRealAug(occ_test_db, cfg.OCCLUSION_LINEMOD, vote_type,
+            occ_test_set = LineModDatasetRealAug(occ_test_db, randomCropping, cfg.OCCLUSION_LINEMOD, vote_type,
                                                  augment=False, use_motion=motion_model)
             occ_test_sampler = SequentialSampler(occ_test_set)
             occ_test_batch_sampler = ImageSizeBatchSampler(occ_test_sampler, train_cfg['test_batch_size'], False)
@@ -563,7 +578,7 @@ def demo_basic(rank, world_size):
             print('testing truncated linemod ...')
             trun_image_db = TruncatedLineModImageDB(args.linemod_cls)
             print(len(trun_image_db.set))
-            trun_image_set = LineModDatasetRealAug(trun_image_db.set, cfg.LINEMOD, vote_type, augment=False,
+            trun_image_set = LineModDatasetRealAug(trun_image_db.set, cfg.LINEMOD, vote_type, randomCropping, augment=False,
                                                    use_intrinsic=True, use_motion=motion_model)
             trun_test_sampler = SequentialSampler(trun_image_set)
             trun_test_batch_sampler = ImageSizeBatchSampler(trun_test_sampler, train_cfg['test_batch_size'], False)
@@ -592,18 +607,20 @@ def demo_basic(rank, world_size):
         if train_cfg['use_fuse']:
             train_db+=image_db.fuse_set
 
-        train_set = LineModDatasetRealAug(train_db, cfg.LINEMOD, vote_type, augment=True, cfg=train_cfg['aug_cfg'], use_motion=motion_model)
-        # train_sampler = RandomSampler(train_set)
-        train_sampler = torch.utils.data.distributed.DistributedSampler(
-            train_set,
-            num_replicas=world_size,
-            rank=rank
-        )
-        train_batch_sampler = ImageSizeBatchSampler(train_sampler, int(train_cfg['train_batch_size']/world_size), False, cfg=train_cfg['aug_cfg'])
-        train_loader = DataLoader(train_set, batch_sampler=train_batch_sampler, shuffle=False, num_workers=12, pin_memory=True)
+        train_set = LineModDatasetRealAug(train_db, randomCropping, cfg.LINEMOD, vote_type, augment=True, cfg=train_cfg['aug_cfg'], use_motion=motion_model)
+        train_sampler = RandomSampler(train_set)
+        # train_sampler = torch.utils.data.distributed.DistributedSampler(
+        #     train_set,
+        #     num_replicas=world_size,
+        #     rank=rank
+        # )
+        # train_batch_sampler = ImageSizeBatchSampler(train_sampler, int(train_cfg['train_batch_size']/world_size), False, cfg=train_cfg['aug_cfg'])
+        train_batch_sampler = ImageSizeBatchSampler(train_sampler, train_cfg['train_batch_size'], False, cfg=train_cfg['aug_cfg'])
+        # train_loader = DataLoader(train_set, batch_sampler=train_batch_sampler, shuffle=False, num_workers=12, pin_memory=True)
+        train_loader = DataLoader(train_set, batch_sampler=train_batch_sampler, num_workers=12)
 
         val_db= image_db.test_real_set+image_db.val_real_set
-        val_set = LineModDatasetRealAug(val_db, cfg.LINEMOD, vote_type, augment=False, cfg=train_cfg['aug_cfg'], use_motion=motion_model)
+        val_set = LineModDatasetRealAug(val_db, randomCropping, cfg.LINEMOD, vote_type, augment=False, cfg=train_cfg['aug_cfg'], use_motion=motion_model)
         val_sampler = SequentialSampler(val_set)
         val_batch_sampler = ImageSizeBatchSampler(val_sampler, train_cfg['test_batch_size'], False, cfg=train_cfg['aug_cfg'])
         val_loader = DataLoader(val_set, batch_sampler=val_batch_sampler, num_workers=12)
@@ -611,7 +628,7 @@ def demo_basic(rank, world_size):
         if args.linemod_cls in cfg.occ_linemod_cls_names:
             occ_image_db=OcclusionLineModImageDB(args.linemod_cls)
             occ_val_db=occ_image_db.test_real_set[:len(occ_image_db.test_real_set)//2]
-            occ_val_set = LineModDatasetRealAug(occ_val_db, cfg.OCCLUSION_LINEMOD, vote_type, augment=False, cfg=train_cfg['aug_cfg'], use_motion=motion_model)
+            occ_val_set = LineModDatasetRealAug(occ_val_db, randomCropping, cfg.OCCLUSION_LINEMOD, vote_type, augment=False, cfg=train_cfg['aug_cfg'], use_motion=motion_model)
             occ_val_sampler = SequentialSampler(occ_val_set)
             occ_val_batch_sampler = ImageSizeBatchSampler(occ_val_sampler, train_cfg['test_batch_size'], False, cfg=train_cfg['aug_cfg'])
             occ_val_loader = DataLoader(occ_val_set, batch_sampler=occ_val_batch_sampler, num_workers=12)
@@ -630,7 +647,7 @@ def demo_basic(rank, world_size):
             adjust_learning_rate(optimizer,epoch,train_cfg['lr_decay_rate'],train_cfg['lr_decay_epoch'])
             for param_group in optimizer.param_groups:
                 lr = param_group['lr']
-            train(net, PVNet, optimizer, train_loader, epoch, rank)
+            train(net, PVNet, optimizer, train_loader, epoch)
             add_list, first_a, first_v, largest_a, smallest_v, smallest_q, p_inc_add, p_dec_v, p_dec_q = val(net, PVNet, val_loader, epoch, lr, writer, use_motion=motion_model)
             if (train_cfg['eval_epoch']
                 and epoch%train_cfg['eval_inter']==0
@@ -656,16 +673,7 @@ def demo_basic(rank, world_size):
         print('ADD. mean: {} +/- {}, max: {}: '.format(np.mean(largest_a_list),np.std(largest_a_list),np.max(largest_a_list)))
         print('ADD perc increase. mean: {} +/- {}, max: {}'.format(np.mean(p_inc_list),np.std(p_inc_list),np.max(p_inc_list)))
         print('X-X^ perc decrease. mean: {} +/- {}, max: {}'.format(np.mean(p_dec_v_list),np.std(p_dec_v_list),np.max(p_dec_v_list)))
-        print('q-q^ perc decrease. mean: {} +/- {}, max: {}'.format(np.mean(p_dec_q_list),np.std(p_dec_q_list),np.max(p_dec_q_list)))
-
-
-def train_net():
-     mp.spawn(demo_basic,
-                args=(4,),
-                nprocs=4,
-                join=True)
-                
-
+        print('q-q^ perc decrease. mean: {} +/- {}, max: {}'.format(np.mean(p_dec_q_list),np.std(p_dec_q_list),np.max(p_dec_q_list)))                
 
 if __name__ == "__main__":
     train_net()
