@@ -1,5 +1,5 @@
 {
-  "model_name":"linemod_train_GE",
+  "model_name":"linemod_train_0408",
 
   "network":"resnet18_8s",
   
@@ -76,10 +76,10 @@
     "saturation":0.05,
     "hue":0.05,
 
-    "wmax":360,
-    "wmin":128,
-    "hmax":360,
-    "hmin":128,
+    "wmax":340,
+    "wmin":256,
+    "hmax":340,
+    "hmin":256,
     "size_int":8,
 
     "ignore_fuse_ms_vertex":false,

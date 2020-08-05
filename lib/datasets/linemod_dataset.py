@@ -3,6 +3,7 @@ import sys
 import time
 import math
 import scipy.misc
+import matplotlib.pyplot as plt
 
 sys.path.append('.')
 
@@ -223,34 +224,20 @@ class LineModDatasetRealAug(Dataset):
         if self.use_intrinsic:
             K = torch.tensor(self.imagedb[index]['K'].astype(np.float32))
 
-        # newHeight = int(120)
-        # newWidth = int(160)
-        # rgb, mask, hcoords = self.resize(rgb, mask, hcoords, newHeight, newWidth)
-        if self.augment:
+        if self.augment:   
+            # plt.figure()
+            # plt.imshow(rgb)
+            name = self.imagedb[index]['rgb_pth'].split("/")
+            # fname = '/home/gerard/myPvnet/pvnet/{}'.format(name[-1])
+            # plt.savefig(fname)        
             
-            rgb, mask, hcoords = self.randomCropping(rgb, mask, hcoords, 2)     
-
-            rgb, mask, hcoords = self.augmentation(rgb, mask, hcoords, height, width)
-            # print('before: ',mask.shape)
-            
-            # print('after: ',mask.shape)
-        #     pathR = self.imagedb[index]['rgb_pth']
-        #     fnameR = '/home/gerard/cropped/{}'.format(pathR) 
-        #     pathM = self.imagedb[index]['dpt_pth']
-        #     pathM = pathM.replace(".jpg",".npy")
-        #     pathM = pathM.replace(".png",".npy")
-        #     fnameM = '/home/gerard/cropped/{}'.format(pathM) 
-        #     pathH = pathR
-        #     pathH = pathH.replace(".jpg","_h.npy")
-        #     pathH = pathH.replace(".png","_h.npy")
-        #     fnameH = '/home/gerard/cropped/{}'.format(pathH)
-        #     scipy.misc.imsave(fnameR,rgb)
-        #     np.save(fnameM,mask)
-        #     np.save(fnameH,hcoords)
-            
-        #     rgb = read_rgb_np(fnameR)
-        #     mask = np.load(fnameM)
-        #     hcoords = np.load(fnameH)
+            rgb, mask, hcoords = self.randomCropping(rgb, mask, hcoords, 1)  
+            rgb, mask, hcoords = self.augmentation(rgb, mask, hcoords, width, width)
+           
+            # plt.figure()
+            # plt.imshow(rgb)
+            # fname = '/home/gerard/myPvnet/pvnet/{}_cropped.jpg'.format(name[-1])
+            # plt.savefig(fname)
 
         ver = compute_vertex_hcoords(mask, hcoords, self.use_motion)
         ver=torch.tensor(ver, dtype=torch.float32).permute(2, 0, 1)
@@ -387,7 +374,7 @@ class RandomScaleCrop(object):
         mask = Image.fromarray(mask.astype('uint8'), 'L')
         
         w, h = img.size
-        crop_size = int(8*int((h/crop_factor)/8))
+        crop_size = int(8*int((h*crop_factor)/8))
 
         x1 = random.randint(0, w - crop_size)
         y1 = random.randint(0, h - crop_size)
@@ -422,7 +409,7 @@ class RandomScaleCrop(object):
         img = img.crop((x1, y1, x1 + crop_size, y1 + crop_size))
         mask = mask.crop((x1, y1, x1 + crop_size, y1 + crop_size))
         img = np.array(img)
-        mask = np.array(mask)
+        mask = np.array(mask) 
 
         hcoords[:,0] = hcoords[:,0] - x1
         hcoords[:,1] = hcoords[:,1] - y1
