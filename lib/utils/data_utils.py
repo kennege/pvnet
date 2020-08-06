@@ -161,7 +161,6 @@ class LineModModelDB(object):
 
 class LineModImageDB(object):
     '''
-
     rgb_pth relative path to cfg.LINEMOD
     dpt_pth relative path to cfg.LINEMOD
     RT np.float32 [3,4]

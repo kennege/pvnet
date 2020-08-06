@@ -3,6 +3,7 @@ import sys
 import time
 import math
 import scipy.misc
+import matplotlib.pyplot as plt
 
 sys.path.append('.')
 
@@ -19,6 +20,7 @@ import cv2
 import numpy as np
 import glob
 from PIL import Image
+from PIL import ImageOps
 import json
 
 from lib.utils.draw_utils import visualize_bounding_box, visualize_vanishing_points, visualize_points, imagenet_to_uint8
@@ -57,7 +59,7 @@ def compute_vertex(mask, center_2d):
     vertex = center_2d[:, np.newaxis, :] - xy
     norm = np.linalg.norm(vertex, axis=2, keepdims=True)
     norm[norm<1e-3] += 1e-3
-    vertex = vertex / np.maximum(1,norm)
+    vertex = vertex / norm
 
     vertex_x = np.tile(mask, reps=[8, 1, 1]).astype(np.float32)
     vertex_x[:, xy[:, 1], xy[:, 0]] = vertex[..., 0]
@@ -76,7 +78,7 @@ def compute_vertex_hcoords(mask, hcoords, use_motion=False):
     if not use_motion:
         norm = np.linalg.norm(vertex, axis=2, keepdims=True)
         norm[norm<1e-3] += 1e-3
-        vertex = vertex / np.maximum(1,norm)
+        vertex = vertex / norm #np.maximum(1,norm)
 
     vertex_out=np.zeros([h,w,m,2],np.float32)
     vertex_out[xy[:, 1], xy[:, 0]] = vertex
@@ -174,7 +176,7 @@ with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),'default_linem
     default_aug_cfg=json.load(f)
 
 class LineModDatasetRealAug(Dataset):
-    def __init__(self, imagedb, data_prefix=cfg.LINEMOD, vote_type=VotingType.BB8,
+    def __init__(self, imagedb, randomCropping, data_prefix=cfg.LINEMOD, vote_type=VotingType.BB8, 
                  augment=False, cfg=default_aug_cfg, background_mask_out=False, use_intrinsic=False,
                  use_motion=False):
         self.imagedb=imagedb
@@ -184,6 +186,7 @@ class LineModDatasetRealAug(Dataset):
         self.use_intrinsic=use_intrinsic
         self.use_motion=use_motion
         self.cfg=cfg
+        self.randomCropping=randomCropping
 
         self.img_transforms=transforms.Compose([
             transforms.ColorJitter(self.cfg['brightness'],self.cfg['contrast'],self.cfg['saturation'],self.cfg['hue']),
@@ -218,34 +221,23 @@ class LineModDatasetRealAug(Dataset):
 
         hcoords=VotingType.get_data_pts_2d(self.vote_type,self.imagedb[index])
 
-        # if self.augment==True and self.cfg['crop']:
-        #     rgb, mask, hcoords = self.crop_by_half(rgb, mask, hcoords)
-        #     pathR = self.imagedb[index]['rgb_pth']
-        #     fnameR = '/home/gerard/cropped/{}'.format(pathR) 
-        #     pathM = self.imagedb[index]['dpt_pth']
-        #     pathM = pathM.replace(".jpg",".npy")
-        #     pathM = pathM.replace(".png",".npy")
-        #     fnameM = '/home/gerard/cropped/{}'.format(pathM) 
-        #     pathH = pathR
-        #     pathH = pathH.replace(".jpg","_h.npy")
-        #     pathH = pathH.replace(".png","_h.npy")
-        #     fnameH = '/home/gerard/cropped/{}'.format(pathH)
-        #     scipy.misc.imsave(fnameR,rgb)
-        #     np.save(fnameM,mask)
-        #     np.save(fnameH,hcoords)
-            
-        #     rgb = read_rgb_np(fnameR)
-        #     mask = np.load(fnameM)
-        #     hcoords = np.load(fnameH)
-
         if self.use_intrinsic:
             K = torch.tensor(self.imagedb[index]['K'].astype(np.float32))
 
-        # newHeight = int(120)
-        # newWidth = int(160)
-        # rgb, mask, hcoords = self.resize(rgb, mask, hcoords, newHeight, newWidth)
-        if self.augment:
-            rgb, mask, hcoords = self.augmentation(rgb, mask, hcoords, height, width)
+        if self.augment:   
+            # plt.figure()
+            # plt.imshow(rgb)
+            name = self.imagedb[index]['rgb_pth'].split("/")
+            # fname = '/home/gerard/myPvnet/pvnet/{}'.format(name[-1])
+            # plt.savefig(fname)        
+            
+            rgb, mask, hcoords = self.randomCropping(rgb, mask, hcoords, 1)  
+            rgb, mask, hcoords = self.augmentation(rgb, mask, hcoords, width, width)
+           
+            # plt.figure()
+            # plt.imshow(rgb)
+            # fname = '/home/gerard/myPvnet/pvnet/{}_cropped.jpg'.format(name[-1])
+            # plt.savefig(fname)
 
         ver = compute_vertex_hcoords(mask, hcoords, self.use_motion)
         ver=torch.tensor(ver, dtype=torch.float32).permute(2, 0, 1)
@@ -269,11 +261,11 @@ class LineModDatasetRealAug(Dataset):
 
         pose=torch.tensor(pose.astype(np.float32))
         hcoords=torch.tensor(hcoords.astype(np.float32))
+
         if self.use_intrinsic:
             return rgb, mask, ver, ver_weight, pose, hcoords, K
         else:
-            return rgb, mask, ver, ver_weight, pose, hcoords, self.imagedb[index]['dpt_pth'], self.imagedb[index]['rgb_pth']
-
+            return rgb, mask, ver, ver_weight, pose, hcoords
 
     def __len__(self):
         return len(self.imagedb)
@@ -316,17 +308,17 @@ class LineModDatasetRealAug(Dataset):
 
         return img, mask, hcoords
 
-    def resize(self, rgb, mask, hcoords, newHeight, newWidth):
+    # def resize(self, rgb, mask, hcoords, newHeight, newWidth):
 
-        resize_ratio = 640/newWidth
+    #     resize_ratio = 640/newWidth
 
-        rgb = cv2.resize(rgb, (newWidth, newHeight), interpolation=cv2.INTER_LINEAR)
-        mask = cv2.resize(mask, (newWidth, newHeight), interpolation=cv2.INTER_NEAREST)
+    #     rgb = cv2.resize(rgb, (newWidth, newHeight), interpolation=cv2.INTER_LINEAR)
+    #     mask = cv2.resize(mask, (newWidth, newHeight), interpolation=cv2.INTER_NEAREST)
 
-        hcoords[:, 0] = hcoords[:, 0] / resize_ratio
-        hcoords[:, 1] = hcoords[:, 1] / resize_ratio
+    #     hcoords[:, 0] = hcoords[:, 0] / resize_ratio
+    #     hcoords[:, 1] = hcoords[:, 1] / resize_ratio
 
-        return rgb, mask, hcoords
+    #     return rgb, mask, hcoords
 
 class ImageSizeBatchSampler(Sampler):
     def __init__(self, sampler, batch_size, drop_last, cfg=default_aug_cfg):
@@ -373,3 +365,53 @@ class ImageSizeBatchSampler(Sampler):
         else:
             return (len(self.sampler) + self.batch_size - 1) // self.batch_size
 
+class RandomScaleCrop(object):
+    def __init__(self, fill=0):
+        self.fill = fill
+
+    def __call__(self, img, mask, hcoords, crop_factor):
+        img = Image.fromarray(img.astype('uint8'), 'RGB')
+        mask = Image.fromarray(mask.astype('uint8'), 'L')
+        
+        w, h = img.size
+        crop_size = int(8*int((h*crop_factor)/8))
+
+        x1 = random.randint(0, w - crop_size)
+        y1 = random.randint(0, h - crop_size)
+
+        mask_np = np.asarray(mask, np.uint8)
+        if mask_np.ndim == 3:
+            mask_np = np.sum(mask_np, axis=2)>0
+        else:
+            mask_np = mask_np > 0
+
+        y_mk, x_mk = np.nonzero(mask_np)
+        min_x, max_x, min_y, max_y = np.min(x_mk), np.max(x_mk), np.min(y_mk), np.max(y_mk)
+        x01 = max(0, max_x - crop_size)
+        x02 = max(min(w, min_x + crop_size) - crop_size, 0)
+
+        y01 = max(0, max_y - crop_size)
+        y02 = max(min(h, min_y + crop_size) - crop_size, 0)
+
+        if x01 != x02 and y01 != y02:
+            x1 = np.random.randint(min(x01, x02), max(x01, x02))
+            y1 = np.random.randint(min(y01, y02), max(y01, y02))
+        elif x01 == x02 and y01 != y02:
+            x1 = x01
+            y1 = np.random.randint(min(y01, y02), max(y01, y02))
+        elif y01 == y02 and x01 != x02:
+            y1 = y01
+            x1 = np.random.randint(min(x01, x02), max(x01, x02))
+        else:
+            x1 = x01
+            y1 = y01
+
+        img = img.crop((x1, y1, x1 + crop_size, y1 + crop_size))
+        mask = mask.crop((x1, y1, x1 + crop_size, y1 + crop_size))
+        img = np.array(img)
+        mask = np.array(mask) 
+
+        hcoords[:,0] = hcoords[:,0] - x1
+        hcoords[:,1] = hcoords[:,1] - y1
+
+        return img, mask, hcoords

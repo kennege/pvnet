@@ -1,14 +1,18 @@
 {
-  "model_name":"linemod_train",
+  "model_name":"linemod_train_0608_smaller",
 
   "network":"resnet18_8s",
   
-  "exp_name":"change_unit_vectors_eval",
-  "sigma":0.3,
-  "train_iterations":4,
+  "object":"ape",
+  "exp_name":"0608_smaller",
+  "sigma":0.6,
+  "train_iterations":2,
+  "skips":1,
 
-  "delta":0.03, 
-  "eval_iterations":50, 
+  "delta":0.6, 
+  "eval_iterations":4, 
+
+  "crop_factor":2,
 
   "lr":1e-3,
   "lr_decay_rate":0.85,
@@ -19,7 +23,7 @@
 
   "resume":false,
   "finetune":false,
-  "epoch_num":200,
+  "epoch_num":50,
 
   "use_real_train":true,
   "use_multi_syn":false,
@@ -35,8 +39,8 @@
   "img_rec_step":160,
 
   "eval_epoch":true,
-  "eval_inter":5,
-  "eval_epoch_begin":120,
+  "eval_inter":1,
+  "eval_epoch_begin":0,
 
   "vote_type":"Farthest",
 
@@ -72,10 +76,10 @@
     "saturation":0.05,
     "hue":0.05,
 
-    "wmax":160,
-    "wmin":64,
-    "hmax":120,
-    "hmin":64,
+    "wmax":40,
+    "wmin":40,
+    "hmax":30,
+    "hmin":30,
     "size_int":8,
 
     "ignore_fuse_ms_vertex":false,

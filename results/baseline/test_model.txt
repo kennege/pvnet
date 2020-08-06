@@ -1,6 +1,0 @@
-val epoch 200 step 200 seg 0.00233599  ver 0.00205671  precision 0.95018816  recall 0.96143818  projection_error 0.99700599  add 0.73153693  cm 0.97405190 
-occ_val epoch 200 step 200 seg 0.00646096  ver 0.04646335  precision 0.88658255  recall 0.67711860  projection_error 0.58803707  add 0.17438922  cm 0.15332772
-val epoch 196 step 196 seg 0.00228897  ver 0.00204738  precision 0.95078856  recall 0.96197283  projection_error 0.99800399  add 0.68662675  cm 0.97904192 
-occ_val epoch 196 step 196 seg 0.00652949  ver 0.04235341  precision 0.89875472  recall 0.66979057  projection_error 0.59814659  add 0.17354676  cm 0.14743050
-val epoch 191 step 191 seg 0.00228333  ver 0.00204829  precision 0.95073646  recall 0.96252924  projection_error 0.99700599  add 0.66966068  cm 0.98103792 
-occ_val epoch 191 step 191 seg 0.00652096  ver 0.04395353  precision 0.89751387  recall 0.66989118  projection_error 0.58719461  add 0.15501264  cm 0.13816344

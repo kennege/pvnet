@@ -1,10 +1,14 @@
 import torch
+import gc
 from torch import nn
 from easydict import EasyDict
 import os
 from tensorboardX import SummaryWriter
 import torchvision.utils as vutils
 import numpy as np
+import matplotlib.pyplot as plt
+from datetime import date
+import lib.datasets.linemod_dataset as ld
 
 
 
@@ -63,13 +67,13 @@ def smooth_l1_loss(vertex_pred, vertex_targets, vertex_weights, sigma=1.0, norma
     '''
     b,ver_dim,_,_=vertex_pred.shape
     sigma_2 = sigma ** 2
-    vertex_diff = vertex_pred - vertex_targets
-    diff = vertex_weights * vertex_diff
-    abs_diff = torch.abs(diff)
+    # vertex_diff = vertex_pred - vertex_targets
+    # diff = vertex_weights * (vertex_pred - vertex_targets)
+    # abs_diff = torch.abs(vertex_weights * (vertex_pred - vertex_targets))
 
-    smoothL1_sign = (abs_diff < 1. / sigma_2).detach().float()
-    in_loss = torch.pow(diff, 2) * (sigma_2 / 2.) * smoothL1_sign \
-              + (abs_diff - (0.5 / sigma_2)) * (1. - smoothL1_sign)
+    smoothL1_sign = (torch.abs(vertex_weights.detach() * (vertex_pred.detach() - vertex_targets.detach())) < 1. / sigma_2).detach().float()
+    in_loss = torch.pow((vertex_weights.detach() * (vertex_pred - vertex_targets.detach())), 2) * (sigma_2 / 2.) * smoothL1_sign \
+              + (torch.abs(vertex_weights.detach() * (vertex_pred - vertex_targets.detach())) - (0.5 / sigma_2)) * (1. - smoothL1_sign)
 
     if normalize:
         in_loss=torch.sum(in_loss.view(b,-1),1) / (ver_dim * torch.sum(vertex_weights.view(b,-1),1) + 1e-3)
@@ -88,8 +92,7 @@ def conv(num_input, num_output, kernel_size, stride, padding, relu=True):
             nn.Conv2d(num_input, num_output, kernel_size, stride, padding),
             nn.ReLU(inplace=True)
         )
-
-
+        
 def load_model(imNet, estNet, optim, model_dir, epoch=-1):
     if not os.path.exists(model_dir):
         return 0
@@ -101,7 +104,7 @@ def load_model(imNet, estNet, optim, model_dir, epoch=-1):
         pth = max(pths)
     else:
         pth = epoch
-    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(80)))
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
     # print(os.path.join(model_dir, '{}.pth'.format(pth)))
     imNet.load_state_dict(pretrained_model['imNet'])
     estNet.load_state_dict(pretrained_model['estNet'])
@@ -109,6 +112,73 @@ def load_model(imNet, estNet, optim, model_dir, epoch=-1):
     print('load model {} epoch {}'.format(model_dir,pretrained_model['epoch']))
     return pretrained_model['epoch'] + 1
 
+def load_model_estNet(estNet, optim, model_dir, epoch=-1):
+    if not os.path.exists(model_dir):
+        return 0
+
+    pths = [int(pth.split('.')[0]) for pth in os.listdir(model_dir)]
+    if len(pths) == 0:
+        return 0
+    if epoch==-1:
+        pth = max(pths)
+    else:
+        pth = epoch
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
+    estNet.load_state_dict(pretrained_model['estNet'])
+    optim.load_state_dict(pretrained_model['optim'])
+    print('load model {} epoch {}'.format(model_dir,pretrained_model['epoch']))
+    return pretrained_model['epoch'] + 1
+
+def load_model_imNet(imNet, optim, model_dir, epoch=-1):
+    if not os.path.exists(model_dir):
+        return 0
+
+    pths = [int(pth.split('.')[0]) for pth in os.listdir(model_dir)]
+    if len(pths) == 0:
+        return 0
+    if epoch==-1:
+        pth = max(pths)
+    else:
+        pth = epoch
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
+    imNet.load_state_dict(pretrained_model['imNet'])
+    optim.load_state_dict(pretrained_model['optim'])
+    print('load model {} epoch {}'.format(model_dir,pretrained_model['epoch']))
+    return pretrained_model['epoch'] + 1
+
+def load_pretrained_estNet(estNet, model_dir, epoch=-1):
+    if not os.path.exists(model_dir):
+        print('model not found')
+        return 0
+
+    pths = [int(pth.split('.')[0]) for pth in os.listdir(model_dir)]
+    if len(pths) == 0:
+        return 0
+    if epoch==-1:
+        pth = max(pths)
+    else:
+        pth = epoch
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
+    estNet.load_state_dict(pretrained_model['estNet'])
+    print('load model {} epoch {}'.format(model_dir,pretrained_model['epoch']))
+    return estNet
+
+def load_pretrained_imNet(imNet, model_dir, epoch=-1):
+    if not os.path.exists(model_dir):
+        print('model not found')
+        return 0
+
+    pths = [int(pth.split('.')[0]) for pth in os.listdir(model_dir)]
+    if len(pths) == 0:
+        return 0
+    if epoch==-1:
+        pth = max(pths)
+    else:
+        pth = epoch
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
+    imNet.load_state_dict(pretrained_model['imNet'])
+    print('load model {} epoch {}'.format(model_dir,pretrained_model['epoch']))
+    return imNet
 
 def load_net(net, model_dir):
     if not os.path.exists(model_dir):
@@ -119,11 +189,26 @@ def load_net(net, model_dir):
         return 0
 
     pth = max(pths)
-    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(80)))
-    # print(os.path.join(model_dir, '{}.pth'.format(pth)))
+    pretrained_model = torch.load(os.path.join(model_dir, '{}.pth'.format(pth)))
     net.load_state_dict(pretrained_model['net'])
     return pretrained_model['epoch'] + 1
 
+
+def save_model_estNet(estNet, optim, epoch, model_dir):
+    os.system('mkdir -p {}'.format(model_dir))
+    torch.save({
+        'estNet': estNet.state_dict(),
+        'optim': optim.state_dict(),
+        'epoch': epoch
+    }, os.path.join(model_dir, '{}.pth'.format(epoch)))
+
+def save_model_imNet(imNet, optim, epoch, model_dir):
+    os.system('mkdir -p {}'.format(model_dir))
+    torch.save({
+        'imNet': imNet.state_dict(),
+        'optim': optim.state_dict(),
+        'epoch': epoch
+    }, os.path.join(model_dir, '{}.pth'.format(epoch)))    
 
 def save_model(imNet, estNet, optim, epoch, model_dir):
     os.system('mkdir -p {}'.format(model_dir))
@@ -133,7 +218,6 @@ def save_model(imNet, estNet, optim, epoch, model_dir):
         'optim': optim.state_dict(),
         'epoch': epoch
     }, os.path.join(model_dir, '{}.pth'.format(epoch)))
-
 
 class AverageMeter(EasyDict):
     """Computes and stores the average and current value"""
@@ -401,20 +485,68 @@ def plot_mask_vfield(image, rgb_pth, mask_init, mask_pth, vertex_init,t):
     plt.savefig(fnameR)  
 
 
-# def perturb_gt_input():
-    # vertex_init = torch.from_numpy(np.zeros((image.shape[0],18,image.shape[2], image.shape[3])))
-    # for b in range(hcoords.shape[0]):  # for image in batch
-    #     # for i in range(hcoords[b].shape[0]): # for coordinate in hcoords
-    #         # hcoords[b][i,0:2]+=random.uniform(-0.1,0.1)*hcoords[b][i,0:2]
-    #     # print(mask[b,:,:].cpu().numpy().shape)
-    #     # print(hcoords[b,:,:].cpu().numpy())
-    #     v = ld.compute_vertex_hcoords(mask[b,:,:].cpu().numpy(),hcoords[b,:,:].cpu().numpy())
-    #     print(v)
-    #     v = torch.from_numpy(v)
-    #     v = v.permute(2,0,1)
-    #     vertex_init[b,:,:,:] = v
-    #     # print(vertex_init[b,:,:,:])
-    # vertex_init = vertex_init.float()
+def compute_step_size(alpha, vertex, vertex_pred, vertex_weights, q_pred, train_cfg,t):
+    c1 = 0.0001
+    c2 = 0.9
+    maxItr = 100
+    eta = 1-(1/maxItr)
+    objectives = []
+    armijo = []
+    alphas = []
+    d_objectives = []
+    d_armijo = []
+    itr = 1
+    while True:
+        lhs_1 = 0.5*torch.norm(vertex_weights * (vertex - (vertex_pred + alpha*q_pred)))**2
+        rhs_1 = (0.5*torch.norm(vertex_weights * (vertex-vertex_pred))**2) - (c1*alpha*torch.norm(vertex_weights * (q_pred))**2)
+        lhs_2 = torch.norm(vertex_weights * (vertex - (vertex_pred + alpha*q_pred)),1)
+        rhs_2 = c2*torch.norm(vertex_weights * (vertex - vertex_pred),1)
+        # print(lhs_1)
+        # print(rhs_1)
+        # print(lhs_2)
+        # print(rhs_2)
+        # print('')
+
+        if (lhs_1 <= rhs_1) and (lhs_2 >= rhs_2):
+            break
+        if itr > maxItr:
+            alpha = 0.001
+            break
+        objectives.append(lhs_1)
+        armijo.append(rhs_1)
+        d_objectives.append(lhs_2)
+        d_armijo.append(rhs_2)
+        alphas.append(alpha)
+        alpha=eta*alpha
+        itr+=1
+    
+    # plt.figure(figsize=[12,6])
+    # ax1 = plt.subplot(121)
+    # ax1.plot(alphas,objectives,'b-',alphas,armijo,'r--')
+    # ax1.set_ylabel('objective')
+    # ax1.set_xlabel(r'$\alpha$')
+    # ax2 = plt.subplot(122)
+    # ax2.plot(alphas,d_objectives,'b-',alphas,d_armijo,'r--')
+    # ax2.set_xlabel(r'$\alpha$')
+    # ax2.set_ylabel('curvature')
+    # plt.savefig('{}/{}_{}_{}.png'.format(train_cfg["exp_name"],date.today(),train_cfg["delta"],t))
+    print('------------------------------------alpha: {}--itr: {}'.format(alpha,itr))          
+
+    return alpha
+
+
+def perturb_gt_input(vertex_init, hcoords, mask):
+    vertex_init_zeros = torch.zeros(vertex_init.shape)
+    vertex_init_pert = vertex_init_zeros
+    for b in range(hcoords.shape[0]):  # for image in batch
+        perturbation = torch.from_numpy((0.02 * np.random.random([9,2])) - 0.01)
+        hcoords[b,:,0:2] = hcoords[b,:,0:2].double() + perturbation.double()
+        v = ld.compute_vertex_hcoords(mask[b,:,:].cpu().numpy(),hcoords[b,:,:].cpu().numpy())
+        v = torch.from_numpy(v)
+        v = v.permute(2,0,1)
+        vertex_init_pert[b,:,:,:] = v
+    vertex_init_pert = vertex_init_pert.cuda()
+    return vertex_init_pert
     
 # def normalise_vector_field(vertex_init,vertex,vertex_weights):
     # normalise batch of vector fields to [-1,1] so that all values maintain original sign

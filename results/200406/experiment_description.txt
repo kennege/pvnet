@@ -1,9 +1,0 @@
-initial estimate: PVNet
-lr_decay_rate: 0.85
-lr_decay_epoch: 10
-batch size: 20
-testing architecture with two encoders, two decoders, and residual loss
-
-also include: .log file
-
-note: realised I had the update question in the wrong spot, so stopped training to fix
