@@ -15,7 +15,7 @@ import os
 from plyfile import PlyData
 from PIL import Image, ImageFile
 from lib.utils.config import cfg
-from lib.utils.extend_utils.extend_utils import farthest_point_sampling
+# from lib.utils.extend_utils.extend_utils import farthest_point_sampling
 from lib.utils.base_utils import read_pickle, save_pickle, Projector, PoseTransformer, read_pose, ModelAligner
 from scipy.misc import imread,imsave
 from lib.utils.draw_utils import write_points, pts_to_img_pts, img_pts_to_pts_img
@@ -141,14 +141,16 @@ class LineModModelDB(object):
     def compute_farthest_surface_point_3d():
         for cls in cfg.linemod_cls_names:
             pts=np.loadtxt(os.path.join(cfg.LINEMOD, cls,'dense_pts.txt'))[:,:3]
-            spts=farthest_point_sampling(pts,8,True)
+            # spts=farthest_point_sampling(pts,8,True)
+            spts=pts[:8,:]
             write_points(os.path.join(cfg.LINEMOD, cls, 'farthest.txt'.format(cls)),spts)
 
     @staticmethod
     def compute_farthest_surface_point_3d_num(num):
         for cls in cfg.linemod_cls_names:
             pts=np.loadtxt(os.path.join(cfg.LINEMOD, cls,'dense_pts.txt'))[:,:3]
-            spts=farthest_point_sampling(pts,num,True)
+            # spts=farthest_point_sampling(pts,num,True)
+            spts=pts[:8,:]
             write_points(os.path.join(cfg.LINEMOD, cls, 'farthest{}.txt'.format(num)),spts)
 
     def get_ply_mesh(self,class_type):
@@ -161,6 +163,7 @@ class LineModModelDB(object):
 
 class LineModImageDB(object):
     '''
+
     rgb_pth relative path to cfg.LINEMOD
     dpt_pth relative path to cfg.LINEMOD
     RT np.float32 [3,4]
