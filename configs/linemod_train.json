@@ -1,10 +1,11 @@
 {
-  "model_name":"linemod_train_0408",
+  "model_name":"linemod_train_0608",
 
   "network":"resnet18_8s",
+  "gadi":false,
   
   "object":"ape",
-  "exp_name":"GE",
+  "exp_name":"GE_0608",
   "sigma":0.6,
   "train_iterations":2,
   "skips":1,
@@ -76,10 +77,10 @@
     "saturation":0.05,
     "hue":0.05,
 
-    "wmax":340,
-    "wmin":256,
-    "hmax":340,
-    "hmin":256,
+    "wmax":160,
+    "wmin":128,
+    "hmax":120,
+    "hmin":64,
     "size_int":8,
 
     "ignore_fuse_ms_vertex":false,

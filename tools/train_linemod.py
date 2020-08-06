@@ -5,6 +5,8 @@ from datetime import date
 from pathlib import Path
 import gc
 import GPUtil
+import copy
+
 
 from skimage.io import imsave
 from tqdm import tqdm
@@ -17,8 +19,8 @@ from matplotlib import cm
 
 sys.path.append('.')
 sys.path.append('..')
-# from lib.ransac_voting_gpu_layer.ransac_voting_gpu import ransac_voting_layer_v3, \
-#     estimate_voting_distribution_with_mean, ransac_voting_layer_v5, ransac_motion_voting
+from lib.ransac_voting_gpu_layer.ransac_voting_gpu import ransac_voting_layer_v3, \
+    estimate_voting_distribution_with_mean, ransac_voting_layer_v5, ransac_motion_voting
 from lib.networks.model_repository import *
 from lib.datasets.linemod_dataset import LineModDatasetRealAug, ImageSizeBatchSampler, VotingType, RandomScaleCrop
 from lib.utils.data_utils import LineModImageDB, OcclusionLineModImageDB, TruncatedLineModImageDB
@@ -116,30 +118,29 @@ class EvalWrapper(nn.Module):
         vertex_pred=vertex_pred.permute(0,2,3,1)
         b,h,w,vn_2=vertex_pred.shape
         vertex_pred=vertex_pred.view(b,h,w,vn_2//2,2)
-        return torch.zeros(b, 3, 4)
 
-#         if use_uncertainty:
-#             return ransac_voting_layer_v5(mask_pred,vertex_pred,128,inlier_thresh=0.99,max_num=100)
-#         else:
-#             return ransac_voting_layer_v3(mask_pred,vertex_pred,128,inlier_thresh=0.99,max_num=100)
+        if use_uncertainty:
+            return ransac_voting_layer_v5(mask_pred,vertex_pred,128,inlier_thresh=0.99,max_num=100)
+        else:
+            return ransac_voting_layer_v3(mask_pred,vertex_pred,128,inlier_thresh=0.99,max_num=100)
 
-# class MotionEvalWrapper(nn.Module):
-#     def forward(self, mask_pred, vertex_pred, use_argmax=True, use_uncertainty=False):
-#         vertex_pred=vertex_pred.permute(0,2,3,1)
-#         b,h,w,vn_2=vertex_pred.shape
-#         vertex_pred=vertex_pred.view(b,h,w,vn_2//2,2)
+class MotionEvalWrapper(nn.Module):
+    def forward(self, mask_pred, vertex_pred, use_argmax=True, use_uncertainty=False):
+        vertex_pred=vertex_pred.permute(0,2,3,1)
+        b,h,w,vn_2=vertex_pred.shape
+        vertex_pred=vertex_pred.view(b,h,w,vn_2//2,2)
 
-#         return ransac_motion_voting(mask_pred, vertex_pred)
+        return ransac_motion_voting(mask_pred, vertex_pred)
 
-# class UncertaintyEvalWrapper(nn.Module):
-#     def forward(self, mask_pred, vertex_pred, use_argmax=True):
-#         vertex_pred=vertex_pred.permute(0,2,3,1)
-#         b,h,w,vn_2=vertex_pred.shape
-#         vertex_pred=vertex_pred.view(b,h,w,vn_2//2,2)
+class UncertaintyEvalWrapper(nn.Module):
+    def forward(self, mask_pred, vertex_pred, use_argmax=True):
+        vertex_pred=vertex_pred.permute(0,2,3,1)
+        b,h,w,vn_2=vertex_pred.shape
+        vertex_pred=vertex_pred.view(b,h,w,vn_2//2,2)
 
-#         mean=ransac_voting_layer_v3(mask_pred, vertex_pred, 512, inlier_thresh=0.99)
-#         mean, var=estimate_voting_distribution_with_mean(mask_pred,vertex_pred,mean)
-#         return mean, var
+        mean=ransac_voting_layer_v3(mask_pred, vertex_pred, 512, inlier_thresh=0.99)
+        mean, var=estimate_voting_distribution_with_mean(mask_pred,vertex_pred,mean)
+        return mean, var
 
 def train(net, PVNet, optimizer, dataloader, epoch):
     for rec in recs: rec.reset()
@@ -156,7 +157,7 @@ def train(net, PVNet, optimizer, dataloader, epoch):
     sigma = train_cfg["sigma"]
     PVNet.eval()
     for idx, data in enumerate(dataloader):
-        image, mask, vertex, vertex_weights,_,_ = [d for d in data]
+        image, mask, vertex, vertex_weights,_,hcoords = [d for d in data]
         # image = image.cuda()
         # mask = mask.cuda()
         # vertex = vertex.cuda()
@@ -168,10 +169,10 @@ def train(net, PVNet, optimizer, dataloader, epoch):
             vertex_init = vertex_init_out.cpu().float()
             del vertex_init_out
 
-            # vertex_init_pert = perturb_gt_input(vertex_init, hcoords.cpu(), mask)
+            vertex_init_pert = perturb_gt_input(vertex_init, hcoords.cpu(), mask)
 
         for i in range(iterations):
-            _, _,_, loss, precision, recall = net(image.detach(), mask.detach(), vertex.detach(), vertex_weights.detach(), vertex_init.detach(), vertex_init.detach())
+            _, _,_, loss, precision, recall = net(image.detach(), mask.detach(), vertex.detach(), vertex_weights.detach(), vertex_init_pert.detach(), vertex_init.detach())
             loss, precision,recall=[torch.mean(val) for val in (loss, precision, recall)]
 
             q_gt = vertex_init - vertex
@@ -182,7 +183,6 @@ def train(net, PVNet, optimizer, dataloader, epoch):
             loss.backward()
             optimizer.step()
           
-            batch_time.update(time.time()-end)
             end=time.time()
                        
             if idx % train_cfg['loss_rec_step'] == 0:
@@ -209,8 +209,8 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
     for rec in recs: rec.reset()
 
     test_begin = time.time()
-    eval_net=DataParallel(EvalWrapper().cuda()) # if not use_motion else DataParallel(MotionEvalWrapper().cuda())
-    # uncertain_eval_net=DataParallel(UncertaintyEvalWrapper().cuda())
+    eval_net=DataParallel(EvalWrapper().cuda()) if not use_motion else DataParallel(MotionEvalWrapper().cuda())
+    uncertain_eval_net=DataParallel(UncertaintyEvalWrapper().cuda())
     net.eval()
           
     if val_prefix=='val':
@@ -284,24 +284,25 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
                 norm_v[id] = norm_v[id] + ((1/torch.sum(vertex_weights).cpu().numpy()) * \
                         (np.linalg.norm((vertex_weights.cpu().numpy() * (vertex_init.cpu().numpy()- vertex.cpu().numpy())))**2)) 
 
-                # if args.use_uncertainty_pnp:
-                #     mean,cov_inv=uncertain_eval_net(mask_init,vertex_init)
-                #     mean=mean.cpu().numpy()
-                #     cov_inv=cov_inv.cpu().numpy()
-                # else: 
-                #     corner_pred=eval_net(mask_init,vertex_init).cpu().detach().numpy()
-                    
-                # b=pose.shape[0]
-                # pose_preds=[]
-                # for bi in range(b):
-                #     intri_type='use_intrinsic' if use_camera_intrinsic else 'linemod'
-                #     K=Ks[bi].cpu().numpy() if use_camera_intrinsic else None
-                #     if args.use_uncertainty_pnp:
-                #         pose_preds.append(evaluatorList[id].evaluate_uncertainty(mean[bi],cov_inv[bi],pose[bi],args.linemod_cls,
-                #                                                         intri_type,vote_type,intri_matrix=K))
-                #     else:
-                #         pose_preds.append(evaluatorList[id].evaluate(corner_pred[bi],pose[bi],args.linemod_cls,intri_type,
-                #             vote_type,intri_matrix=K))
+                if ~train_cfg["gadi"]:
+                    if args.use_uncertainty_pnp:
+                        mean,cov_inv=uncertain_eval_net(mask_init,vertex_init)
+                        mean=mean.cpu().numpy()
+                        cov_inv=cov_inv.cpu().numpy()
+                    else: 
+                        corner_pred=eval_net(mask_init,vertex_init).cpu().detach().numpy()
+                        
+                    b=pose.shape[0]
+                    pose_preds=[]
+                    for bi in range(b):
+                        intri_type='use_intrinsic' if use_camera_intrinsic else 'linemod'
+                        K=Ks[bi].cpu().numpy() if use_camera_intrinsic else None
+                        if args.use_uncertainty_pnp:
+                            pose_preds.append(evaluatorList[id].evaluate_uncertainty(mean[bi],cov_inv[bi],pose[bi],args.linemod_cls,
+                                                                            intri_type,vote_type,intri_matrix=K))
+                        else:
+                            pose_preds.append(evaluatorList[id].evaluate(corner_pred[bi],pose[bi],args.linemod_cls,intri_type,
+                                vote_type,intri_matrix=K))
 
 
                 # if args.save_inter_result:
@@ -340,20 +341,20 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
     
     for i in range(iterations):
         # if (i % train_cfg["skips"]==0) or (i==0):
-        # proj_err,add,cm=evaluatorList[id].average_precision(False)
+        proj_err,add,cm=evaluatorList[id].average_precision(False)
         # losses_q[id] = losses_q[id] / len(dataloader)
         norm_q[id] = norm_q[id] / len(dataloader)
         norm_v[id] = norm_v[id] / len(dataloader)           
         if i==0:
-            # first_a = add
-            # largest_a = add
+            first_a = add
+            largest_a = add
             first_v = norm_v[id]
             smallest_v = norm_v[id]
         if i==1:
             first_q = norm_q[id]
             smallest_q = norm_q[id]
-        # proj_err_list.append(proj_err)
-        # add_list.append(add)
+        proj_err_list.append(proj_err)
+        add_list.append(add)
         # losses_vertex[id] = losses_vertex[id] / len(dataloader)
         deltas[id] = deltas[id] / len(dataloader)
         if i > 0:
@@ -362,25 +363,27 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
                 smallest_v = norm_v[id]
                 if i>1:
                     smallest_q = norm_q[id]                    
-            # if add > largest_a:
-            #     largest_a = add
+            if add > largest_a:
+                largest_a = add
         id+=1
-    # if (largest_a == first_a):
-        # largest_a = max(add_list.remove(largest_a))
+    if (largest_a == first_a):
+        new_add_list = copy.copy(add_list)
+        new_add_list.remove(largest_a)
+        largest_a = max(new_add_list)
 
     # print("after loop")
     # print("smallest_v after: ", smallest_v)
     # print("first_v after: ",first_v)
     # print("largest_a after: ", largest_a)
-    # print("add list: ",add_list)
+    print("add list: ",add_list)
     print('X-X^: ', norm_v )
     # print('smallest_q after', smallest_q)
     # print('first_q after', first_q)
-    # p_increase_add = ((largest_a - first_a)/first_a)*100
+    p_increase_add = ((largest_a - first_a)/first_a)*100
     p_decrease_v = ((first_v - smallest_v)/first_v) * 100
     p_decrease_q = ((first_q - smallest_q)/first_q) * 100
     print(train_cfg['exp_name'])
-    # print('add percentage increase ', p_increase_add)
+    print('add percentage increase ', p_increase_add)
     print('X-X^ percentage decrease: ',p_decrease_v)
     print('q-q^ percentage decrease: ',p_decrease_q)
 
@@ -451,13 +454,13 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
         and epoch>=train_cfg['eval_epoch_begin']
         and val_prefix == 'val'): # or args.test_model:
         print(val_prefix)
-        # proj_err,add,cm=evaluatorList[-1].average_precision(False)
-        # losses_batch['{}/scalar/projection_error'.format(val_prefix)]=proj_err
-        # losses_batch['{}/scalar/add'.format(val_prefix)]=add
-        # losses_batch['{}/scalar/cm'.format(val_prefix)]=cm
+        proj_err,add,cm=evaluatorList[-1].average_precision(False)
+        losses_batch['{}/scalar/projection_error'.format(val_prefix)]=proj_err
+        losses_batch['{}/scalar/add'.format(val_prefix)]=add
+        losses_batch['{}/scalar/cm'.format(val_prefix)]=cm
         recorder.rec_loss_batch(losses_batch, epoch, epoch, val_prefix)
-        # writer.add_scalar('projection error', proj_err, epoch)
-        # writer.add_scalar('add',add,epoch)
+        writer.add_scalar('projection error', proj_err, epoch)
+        writer.add_scalar('add',add,epoch)
         # writer.add_scalar('vertex loss',loss_vertex, epoch)
         # writer.add_scalar('q loss',loss_q, epoch)
         # writer.add_scalar('seg loss', loss_seg, epoch)
@@ -648,18 +651,19 @@ def train_net():
             # print('evaluate with train_loader')
             # _,_,_,_,_,_,_,_,_ = val(net, PVNet, train_loader, epoch, lr, writer, use_motion=motion_model)
             print('evaluate with val_loader')
-            add_list, first_a, first_v, largest_a, smallest_v, smallest_q, p_inc_add, p_dec_v, p_dec_q = val(net, PVNet, val_loader, epoch, lr, writer, use_motion=motion_model)
+            if ~train_cfg["gadi"]:
+                add_list, first_a, first_v, largest_a, smallest_v, smallest_q, p_inc_add, p_dec_v, p_dec_q = val(net, PVNet, val_loader, epoch, lr, writer, use_motion=motion_model)
             if (train_cfg['eval_epoch']
                 and epoch%train_cfg['eval_inter']==0
                 and epoch>=train_cfg['eval_epoch_begin']) or args.test_model: 
                 if epoch >=30:
-                    # add_list_list.append(add_list)
-                    # first_a_list.append(first_a)
+                    add_list_list.append(add_list)
+                    first_a_list.append(first_a)
                     first_v_list.append(first_v)
-                    # p_inc_list.append(p_inc_add)
+                    p_inc_list.append(p_inc_add)
                     p_dec_v_list.append(p_dec_v)
                     p_dec_q_list.append(p_dec_q)
-                    # largest_a_list.append(largest_a)
+                    largest_a_list.append(largest_a)
                     smallest_v_list.append(smallest_v)
                     smallest_q_list.append(smallest_q)
             # if args.linemod_cls in cfg.occ_linemod_cls_names:
@@ -668,10 +672,10 @@ def train_net():
             save_model(net.module.imNet, net.module.estNet, optimizer, epoch, model_dir)
             epoch_count+=1
         print(train_cfg['exp_name'])
-        # print('PVNet ADD. mean: {} +/- {}, max: {}'.format(np.mean(first_a_list),np.std(first_a_list),np.max(first_a_list)))
+        print('PVNet ADD. mean: {} +/- {}, max: {}'.format(np.mean(first_a_list),np.std(first_a_list),np.max(first_a_list)))
         # print('PVNet X-X^. mean: {} +/- {}, max: {}'.format(np.mean(first_v_list),np.std(first_v_list),np.max(first_v_list)))
-        # print('ADD. mean: {} +/- {}, max: {}: '.format(np.mean(largest_a_list),np.std(largest_a_list),np.max(largest_a_list)))
-        # print('ADD perc increase. mean: {} +/- {}, max: {}'.format(np.mean(p_inc_list),np.std(p_inc_list),np.max(p_inc_list)))
+        print('ADD. mean: {} +/- {}, max: {}: '.format(np.mean(largest_a_list),np.std(largest_a_list),np.max(largest_a_list)))
+        print('ADD perc increase. mean: {} +/- {}, max: {}'.format(np.mean(p_inc_list),np.std(p_inc_list),np.max(p_inc_list)))
         print('X-X^ perc decrease. mean: {} +/- {}, max: {}'.format(np.mean(p_dec_v_list),np.std(p_dec_v_list),np.max(p_dec_v_list)))
         print('q-q^ perc decrease. mean: {} +/- {}, max: {}'.format(np.mean(p_dec_q_list),np.std(p_dec_q_list),np.max(p_dec_q_list))) 
 
