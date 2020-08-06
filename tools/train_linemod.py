@@ -5,6 +5,8 @@ from datetime import date
 from pathlib import Path
 import gc
 import GPUtil
+import copy
+
 
 from skimage.io import imsave
 from tqdm import tqdm
@@ -155,7 +157,7 @@ def train(net, PVNet, optimizer, dataloader, epoch):
     sigma = train_cfg["sigma"]
     PVNet.eval()
     for idx, data in enumerate(dataloader):
-        image, mask, vertex, vertex_weights,_,_ = [d for d in data]
+        image, mask, vertex, vertex_weights,_,hcoords = [d for d in data]
         # image = image.cuda()
         # mask = mask.cuda()
         # vertex = vertex.cuda()
@@ -167,10 +169,10 @@ def train(net, PVNet, optimizer, dataloader, epoch):
             vertex_init = vertex_init_out.cpu().float()
             del vertex_init_out
 
-            # vertex_init_pert = perturb_gt_input(vertex_init, hcoords.cpu(), mask)
+            vertex_init_pert = vertex_init #perturb_gt_input(vertex_init, hcoords.cpu(), mask)
 
         for i in range(iterations):
-            _, _,_, loss, precision, recall = net(image.detach(), mask.detach(), vertex.detach(), vertex_weights.detach(), vertex_init.detach(), vertex_init.detach())
+            _, _,_, loss, precision, recall = net(image.detach(), mask.detach(), vertex.detach(), vertex_weights.detach(), vertex_init_pert.detach(), vertex_init.detach())
             loss, precision,recall=[torch.mean(val) for val in (loss, precision, recall)]
 
             q_gt = vertex_init - vertex
@@ -365,7 +367,9 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
                 largest_a = add
         id+=1
     if (largest_a == first_a):
-        largest_a = max(add_list.remove(largest_a))
+        new_add_list = copy.copy(add_list)
+        new_add_list.remove(largest_a)
+        largest_a = max(new_add_list)
 
     # print("after loop")
     # print("smallest_v after: ", smallest_v)
