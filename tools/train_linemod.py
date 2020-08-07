@@ -284,7 +284,7 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
                 norm_v[id] = norm_v[id] + ((1/torch.sum(vertex_weights).cpu().numpy()) * \
                         (np.linalg.norm((vertex_weights.cpu().numpy() * (vertex_init.cpu().numpy()- vertex.cpu().numpy())))**2)) 
 
-                if ~train_cfg["gadi"]:
+                if not train_cfg["gadi"]:
                     if args.use_uncertainty_pnp:
                         mean,cov_inv=uncertain_eval_net(mask_init,vertex_init)
                         mean=mean.cpu().numpy()
@@ -526,28 +526,20 @@ def train_net():
 
     for param_group in optimizer.param_groups:
         lr = param_group['lr']
-
-    image_db = LineModImageDB(args.linemod_cls,has_render_set=False,
-                                has_fuse_set=False)
-    test_db = image_db.test_real_set+image_db.val_real_set
-    test_set = LineModDatasetRealAug(test_db, randomCropping, cfg.LINEMOD, vote_type, augment=False, use_motion=motion_model)
-    test_sampler = SequentialSampler(test_set)
-    test_batch_sampler = ImageSizeBatchSampler(test_sampler, train_cfg['test_batch_size'], False)
-    test_loader = DataLoader(test_set, batch_sampler=test_batch_sampler, num_workers=0)
-    prefix='test' #if args.use_test_set else 'val'
     
     if args.test_model:
         begin_epoch=load_model(net.module.imNet, net.module.estNet, optimizer, model_dir, args.load_epoch)
         
         if args.normal:
             print('testing normal linemod ...') 
-            # image_db = LineModImageDB(args.linemod_cls,has_render_set=False,
-            #                           has_fuse_set=False)
-            # test_db = image_db.test_real_set+image_db.val_real_set
-            # test_set = LineModDatasetRealAug(test_db, randomCropping, cfg.LINEMOD, vote_type, augment=False, use_motion=motion_model)
-            # test_sampler = SequentialSampler(test_set)
-            # test_batch_sampler = ImageSizeBatchSampler(test_sampler, train_cfg['test_batch_size'], False)
-            # test_loader = DataLoader(test_set, batch_sampler=test_batch_sampler, num_workers=0)
+            image_db = LineModImageDB(args.linemod_cls,has_render_set=False,
+                                      has_fuse_set=False)
+            test_db = image_db.test_real_set+image_db.val_real_set
+            test_set = LineModDatasetRealAug(test_db, randomCropping, cfg.LINEMOD, vote_type, augment=False, use_motion=motion_model)
+            test_sampler = SequentialSampler(test_set)
+            test_batch_sampler = ImageSizeBatchSampler(test_sampler, train_cfg['test_batch_size'], False)
+            test_loader = DataLoader(test_set, batch_sampler=test_batch_sampler, num_workers=0)
+            
             val_db= image_db.test_real_set+image_db.val_real_set
             val_set = LineModDatasetRealAug(val_db, randomCropping, cfg.LINEMOD, vote_type, augment=False, cfg=train_cfg['aug_cfg'], use_motion=motion_model)
             val_sampler = SequentialSampler(val_set)
@@ -651,33 +643,35 @@ def train_net():
             # print('evaluate with train_loader')
             # _,_,_,_,_,_,_,_,_ = val(net, PVNet, train_loader, epoch, lr, writer, use_motion=motion_model)
             print('evaluate with val_loader')
-            if ~train_cfg["gadi"]:
+            if not train_cfg["gadi"]:
+
                 add_list, first_a, first_v, largest_a, smallest_v, smallest_q, p_inc_add, p_dec_v, p_dec_q = val(net, PVNet, val_loader, epoch, lr, writer, use_motion=motion_model)
-            if (train_cfg['eval_epoch']
-                and epoch%train_cfg['eval_inter']==0
-                and epoch>=train_cfg['eval_epoch_begin']) or args.test_model: 
-                if epoch >=30:
-                    add_list_list.append(add_list)
-                    first_a_list.append(first_a)
-                    first_v_list.append(first_v)
-                    p_inc_list.append(p_inc_add)
-                    p_dec_v_list.append(p_dec_v)
-                    p_dec_q_list.append(p_dec_q)
-                    largest_a_list.append(largest_a)
-                    smallest_v_list.append(smallest_v)
-                    smallest_q_list.append(smallest_q)
+                if (train_cfg['eval_epoch']
+                    and epoch%train_cfg['eval_inter']==0
+                    and epoch>=train_cfg['eval_epoch_begin']) or args.test_model: 
+                    if epoch >=30:
+                        add_list_list.append(add_list)
+                        first_a_list.append(first_a)
+                        first_v_list.append(first_v)
+                        p_inc_list.append(p_inc_add)
+                        p_dec_v_list.append(p_dec_v)
+                        p_dec_q_list.append(p_dec_q)
+                        largest_a_list.append(largest_a)
+                        smallest_v_list.append(smallest_v)
+                        smallest_q_list.append(smallest_q)
             # if args.linemod_cls in cfg.occ_linemod_cls_names:
             #     val(net, PVNet, occ_val_loader, epoch, lr, writer, 'occ_val',use_motion=motion_model)
 
             save_model(net.module.imNet, net.module.estNet, optimizer, epoch, model_dir)
             epoch_count+=1
-        print(train_cfg['exp_name'])
-        print('PVNet ADD. mean: {} +/- {}, max: {}'.format(np.mean(first_a_list),np.std(first_a_list),np.max(first_a_list)))
-        # print('PVNet X-X^. mean: {} +/- {}, max: {}'.format(np.mean(first_v_list),np.std(first_v_list),np.max(first_v_list)))
-        print('ADD. mean: {} +/- {}, max: {}: '.format(np.mean(largest_a_list),np.std(largest_a_list),np.max(largest_a_list)))
-        print('ADD perc increase. mean: {} +/- {}, max: {}'.format(np.mean(p_inc_list),np.std(p_inc_list),np.max(p_inc_list)))
-        print('X-X^ perc decrease. mean: {} +/- {}, max: {}'.format(np.mean(p_dec_v_list),np.std(p_dec_v_list),np.max(p_dec_v_list)))
-        print('q-q^ perc decrease. mean: {} +/- {}, max: {}'.format(np.mean(p_dec_q_list),np.std(p_dec_q_list),np.max(p_dec_q_list))) 
+        if ~train_cfg['gadi']:
+            print(train_cfg['exp_name'])
+            print('PVNet ADD. mean: {} +/- {}, max: {}'.format(np.mean(first_a_list),np.std(first_a_list),np.max(first_a_list)))
+            # print('PVNet X-X^. mean: {} +/- {}, max: {}'.format(np.mean(first_v_list),np.std(first_v_list),np.max(first_v_list)))
+            print('ADD. mean: {} +/- {}, max: {}: '.format(np.mean(largest_a_list),np.std(largest_a_list),np.max(largest_a_list)))
+            print('ADD perc increase. mean: {} +/- {}, max: {}'.format(np.mean(p_inc_list),np.std(p_inc_list),np.max(p_inc_list)))
+            print('X-X^ perc decrease. mean: {} +/- {}, max: {}'.format(np.mean(p_dec_v_list),np.std(p_dec_v_list),np.max(p_dec_v_list)))
+            print('q-q^ perc decrease. mean: {} +/- {}, max: {}'.format(np.mean(p_dec_q_list),np.std(p_dec_q_list),np.max(p_dec_q_list))) 
 
 
 if __name__ == "__main__":

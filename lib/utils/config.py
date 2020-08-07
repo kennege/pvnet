@@ -32,6 +32,7 @@ add_path()
 Data settings
 """
 cfg.LINEMOD = os.path.join(cfg.DATA_DIR, 'LINEMOD')
+cfg.LINEMOD_PBR = os.path.join(cfg.DATA_DIR, 'lm')
 cfg.LINEMOD_ORIG = os.path.join(cfg.DATA_DIR, 'LINEMOD_ORIG')
 cfg.OCCLUSION_LINEMOD = os.path.join(cfg.DATA_DIR, 'OCCLUSION_LINEMOD')
 cfg.YCB = os.path.join(cfg.DATA_DIR, 'YCB')
