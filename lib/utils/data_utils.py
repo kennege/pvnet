@@ -56,9 +56,9 @@ class LineModModelDB(object):
             return self.corners_3d[class_type]
 
         corner_pth=os.path.join(cfg.LINEMOD, class_type, 'corners.txt')
-        if os.path.exists(corner_pth):
-            self.corners_3d[class_type]=np.loadtxt(corner_pth)
-            return self.corners_3d[class_type]
+        # if os.path.exists(corner_pth):
+        #     self.corners_3d[class_type]=np.loadtxt(corner_pth)
+        #     return self.corners_3d[class_type]
 
         ply_path = self.ply_pattern.format(class_type, class_type)
         ply = PlyData.read(ply_path)
@@ -81,7 +81,7 @@ class LineModModelDB(object):
             [max_x, max_y, max_z],
         ])
         self.corners_3d[class_type] = corners_3d
-        np.savetxt(corner_pth,corners_3d)
+        # np.savetxt(corner_pth,corners_3d)
 
         return corners_3d
 
@@ -162,7 +162,6 @@ class LineModModelDB(object):
 
         return vert, vert_id
 
-
 class LineModModelDB_pbr(object):
     '''
     LineModModelDB is used for managing the mesh of each model
@@ -189,18 +188,19 @@ class LineModModelDB_pbr(object):
 
         self.ply_pattern = os.path.join(pbr_models, 'obj_{:06d}.ply')
         self.diameter_pattern = os.path.join(cfg.LINEMOD_ORIG,'{}/distance.txt')
-        self.farthest_pattern = os.path.join(cfg.LINEMOD, '{}/farthest{}.txt')
+        self.farthest_pattern = os.path.join(pbr_models, '{}_farthest{}.txt')
+        # self.farthest_pattern = os.path.join(cfg.LINEMOD,'{}/farthest{}.txt')
 
     def get_corners_3d(self, class_type):
         if class_type in self.corners_3d:
             return self.corners_3d[class_type]
 
         corner_pth=os.path.join(cfg.LINEMOD, class_type, 'corners.txt')
-        if os.path.exists(corner_pth):
-            self.corners_3d[class_type]=np.loadtxt(corner_pth)
-            return self.corners_3d[class_type]
+        # if os.path.exists(corner_pth):
+        #     self.corners_3d[class_type]=np.loadtxt(corner_pth)
+        #     return self.corners_3d[class_type]
 
-        cls_id = self.linemod_cls_dict_pbr[class_type]
+        cls_id = self.linemod_cls_dict_pbr[class_type]+1
         ply_path = self.ply_pattern.format(cls_id)
         ply = PlyData.read(ply_path)
         data = ply.elements[0].data
@@ -222,7 +222,7 @@ class LineModModelDB_pbr(object):
             [max_x, max_y, max_z],
         ])
         self.corners_3d[class_type] = corners_3d
-        np.savetxt(corner_pth,corners_3d)
+        # np.savetxt(corner_pth,corners_3d)
 
         return corners_3d
 
@@ -274,8 +274,10 @@ class LineModModelDB_pbr(object):
 
         if num==8:
             farthest_path = self.farthest_pattern.format(class_type,'')
+            self.pbr_compute_farthest_surface_point_3d(class_type)
         else:
             farthest_path = self.farthest_pattern.format(class_type,num)
+            self.pbr_compute_farthest_surface_point_3d_num(class_type,num)
         farthest_pts = np.loadtxt(farthest_path)
         self.farthest_3d['{}'.format(num)][class_type] = farthest_pts
         return farthest_pts
@@ -337,8 +339,6 @@ class LineModImageDB(object):
         self.class_idx = self.linemod_cls_dict_pbr[self.cls_name]
         #############################
 
-        self.cls_name=cls_name
-
         # some dirs for processing      
         os.path.join(cfg.LINEMOD,'posedb','{}_render.pkl'.format(cls_name))
         self.pbr_dir = cfg.LINEMOD_PBR ###
@@ -355,13 +355,13 @@ class LineModImageDB(object):
 
         if has_render_set:
             self.render_pkl=os.path.join(self.linemod_dir,'posedb','{}_render.pkl'.format(cls_name))
-            # prepare dataset
-            if os.path.exists(self.render_pkl):
-                # read cached
-                self.render_set=read_pickle(self.render_pkl)
-            else:
-                # process render set
-                self.render_set=self.collect_render_set_info(self.render_pkl,self.render_dir)
+            # # prepare dataset
+            # if os.path.exists(self.render_pkl):
+            #     # read cached
+            #     self.render_set=read_pickle(self.render_pkl)
+            # else:
+            #     # process render set
+            self.render_set=self.collect_render_set_info(self.render_pkl,self.render_dir)
         else:
             self.render_set=[]
 
@@ -420,7 +420,11 @@ class LineModImageDB(object):
         ###
         folder_dir = os.path.join(self.pbr_root, "lm/train_pbr/")
         folders = os.listdir(folder_dir)
-        modeldb=LineModModelDB_pbr()
+        modeldb_pbr=LineModModelDB_pbr()
+        center_LM = modeldb.get_centers_3d(self.cls_name)
+        center_PBR = modeldb_pbr.get_centers_3d(self.cls_name)
+        R_ = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
+        T_ = center_PBR - (np.matmul(R_,center_LM)*1000)
         for scene in folders:
             with open(os.path.join(folder_dir, scene, "scene_gt.json"), "r") as f:
                 images_info = json.load(f)
@@ -442,15 +446,22 @@ class LineModImageDB(object):
                         if y.shape[0] < 100:
                             continue
                         R = np.array(image_info[idx]["cam_R_m2c"], dtype=np.float).reshape(3,3)
-                        T = np.array(image_info[idx]["cam_t_m2c"], dtype=np.float).reshape(3,1)
+                        T = np.array(image_info[idx]["cam_t_m2c"], dtype=np.float).reshape(3,1) 
                         RT = np.concatenate([R, T], axis=1)
                         data["RT"] = RT
-                        data["K"]  = np.array(Ks_info[k_str]["cam_K"],dtype=np.float).reshape(3,3)
+                        data["K"] = np.array(Ks_info[k_str]["cam_K"],dtype=np.float).reshape(3,3)
                         data["cls_typ"] = self.cls_name
                         data["rnd_typ"] = "render"
-                        data["corners"] = projector.project_K(modeldb.get_centers_3d(self.cls_name), data["RT"], data["K"])
-                        data["farthest"] = projector.project_K(modeldb.get_farthest_3d(self.cls_name), data["RT"], data["K"])
-                        data["center"] = projector.project_K(modeldb.get_centers_3d(self.cls_name)[None,:], data["RT"], data["K"])
+                        # T_stack = np.transpose(np.vstack((T_,T_,T_,T_,T_,T_,T_,T_)))
+                        # corners = np.transpose(np.matmul(R_,(np.transpose(1000*modeldb.get_corners_3d(self.cls_name)))) + T_stack)
+                        # farthest_3d = np.transpose(np.matmul(R_,(np.transpose(1000*modeldb.get_farthest_3d(self.cls_name)))) + T_stack)
+                        # centers = np.transpose(np.matmul(R_,np.transpose(1000*modeldb.get_centers_3d(self.cls_name)[None,:])) + T_.reshape(3,1))
+                        # data["corners"] = projector.project_K(corners, data["RT"], data["K"])
+                        # data["farthest"] = projector.project_K(farthest_3d, data["RT"], data["K"])
+                        # data["center"] = projector.project_K(centers, data["RT"], data["K"])
+                        data['corners']=projector.project_K(modeldb_pbr.get_corners_3d(self.cls_name),data['RT'], data["K"])
+                        data['farthest']=projector.project_K(modeldb_pbr.get_farthest_3d(self.cls_name),data['RT'], data["K"])
+                        data['center']=projector.project_K(modeldb_pbr.get_centers_3d(self.cls_name)[None,:],data['RT'], data["K"])
                         database.append(data)
         ###
 

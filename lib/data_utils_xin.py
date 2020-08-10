@@ -144,7 +144,7 @@ class LineModModelDB(object):
         for cls in cfg.linemod_cls_names:
             pts=np.loadtxt(os.path.join(cfg.LINEMOD, cls,'dense_pts.txt'))[:,:3]
             spts=farthest_point_sampling(pts,8,True)
-            write_points(os.path.join(cfg.LINEMOD, cls, 'farthest.txt'.format(cls)),spts)
+            write_points(os.path.join(cfg.LINEMOD, cls,'farthest.txt'.format(cls)),spts)
 
     @staticmethod
     def compute_farthest_surface_point_3d_num(num):

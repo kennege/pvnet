@@ -301,6 +301,10 @@ class LineModDatasetRealAug(Dataset):
         else:
             img, mask = crop_or_padding_to_fixed_size(img, mask, height, width)
 
+        # rescale PBR mask 
+        m = np.array(mask)
+        if m.max()==255:
+            mask = mask/255
 
         # randomly flip
         if self.cfg['flip'] and np.random.random() < 0.5:

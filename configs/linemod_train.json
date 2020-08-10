@@ -2,7 +2,7 @@
   "model_name":"linemod_train_0708",
 
   "network":"resnet18_8s",
-  "gadi":true,
+  "gadi":false,
   
   "object":"ape",
   "exp_name":"GE_0708",
