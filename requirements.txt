@@ -4,7 +4,6 @@ matplotlib==3.0.2
 transforms3d==0.3.1
 scikit_image==0.13.1
 lmdb==0.94
-torch==1.1
 setuptools==39.1.0
 cffi==1.11.5
 torchvision==0.3

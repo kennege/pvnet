@@ -1,0 +1,16 @@
+#DATASET_DIR='/scratch/ll21/ys7429/pcpnet/'
+#NAME='Deepfit_experts_5g_e3_t'
+#ARCH='experts'
+#FIT_TYPE='plane'
+#N_EXPERTS=3
+#N_GAUSSIANS=5
+#RESULTS_PATH='./log/'${NAME}'/results/'
+#BATCH_SIZE=256
+#TRAINSET='trainingset_whitenoise.txt'
+module load  pytorch/1.4.0a0
+module load python3/3.7.4
+cd /home/137/ys7429/DeepFit3D/DeepFit3D-NormalEstimation/Normal_Estimation
+#python3 train_n_est.py --name=$NAME --gpu_idx 0 --indir $DATASET_DIR --batchSize $BATCH_SIZE --nepoch 500 --fit_type $FIT_TYPE --n_experts $N_EXPERTS --n_gaussians $N_GAUSSIANS --arch $ARCH --overwrite --trainset $TRAINSET
+#python3 test_n_est.py --indir $DATASET_DIR --gpu_idx 0 --models $NAME --modelpostfix '_model_0.pth' --testset 'testset_no_noise.txt'
+#python3 evaluate.py --normal_results_path $RESULTS_PATH --data_path $DATASET_DIR
+python3 run_jetNet_single_experiment.py

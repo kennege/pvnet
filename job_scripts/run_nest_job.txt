@@ -1,0 +1,14 @@
+#!/bin/bash
+#PBS -P ll21
+#PBS -q gpuvolta 
+#PBS -l walltime=07:00:00
+#PBS -l ngpus=1
+#PBS -l ncpus=12
+#PBS -l mem=6GB
+#PBS -l wd
+#PBS -j oe
+#PBS -M sitzikbs@gmail.com
+#PBS -m abe
+
+/home/137/ys7429/DeepFit3D/DeepFit3D-NormalEstimation/Normal_Estimation/run_DeepFit3D.sh
+

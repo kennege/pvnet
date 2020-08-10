@@ -1,0 +1,30 @@
+#!/bin/bash
+#PBS -P lf46
+#PBS -q gpu
+#PBS -l walltime=07:00:00
+#PBS -l ngpus=4
+#PBS -l ncpus=12
+#PBS -l mem=6GB
+#PBS -l wd
+#PBS -j oe
+#PBS -M gerard.kennedy@anu.edu.au
+#PBS -l software=python
+
+cp /g/data/lf46/training_data.tar.gz $PBS_JOBFS
+cd $PBS_JOBFS
+tar -xf training_data.tar.gz
+
+ln -s $PBS_JOBFS/data/LINEMOD /home/137/gk5674/pvnet/data/LINEMOD
+ln -s $PBS_JOBFS/data/LINEMOD_ORIG /home/137/gk5674/pvnet/data/LINEMOD_ORIG
+ln -s $PBS_JOBFS/data/OCCLUSION_LINEMOD /home/137/gk5674/pvnet/data/OCCLUSION_LINEMOD
+ln -s $PBS_JOBFS/data/lm /home/137/gk5674/pvnet/data/lm
+
+module load cuda/10.0
+module load pytorch/1.4.0a0
+module load python/3.6.10
+cd /home/137/gk5674/pvnet
+
+pip install -r requirements.txt
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/137/gk5674/pvnet/lib/utils/extend_utils/lib
+
+python tools/train_linemod.py --cfg_file configs/linemod_train.json --linemod_cls ape 
