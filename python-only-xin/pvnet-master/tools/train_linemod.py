@@ -7,7 +7,6 @@ import gc
 import GPUtil
 
 from skimage.io import imsave
-from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 import glob
 import matplotlib.pyplot as plt

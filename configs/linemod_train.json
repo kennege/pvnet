@@ -1,11 +1,11 @@
 {
-  "model_name":"linemod_train_0708",
+  "model_name":"linemod_train_1108_ape",
 
   "network":"resnet18_8s",
   "gadi":false,
   
   "object":"ape",
-  "exp_name":"GE_0708",
+  "exp_name":"GE_1108_ape",
   "sigma":0.6,
   "train_iterations":2,
   "skips":1,

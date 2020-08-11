@@ -162,10 +162,10 @@ def train(net, PVNet, optimizer, dataloader, epoch):
         # mask = mask.cuda()
         # vertex = vertex.cuda()
         # vertex_weights = vertex_weights.cuda()        
-        im = image.half()
+        # im = image.half()
         data_time.update(time.time()-end)
         with torch.no_grad():
-            _, vertex_init_out = PVNet(im)
+            _, vertex_init_out = PVNet(image)
             vertex_init = vertex_init_out.cpu().float()
             del vertex_init_out
 
@@ -245,7 +245,7 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
             # vertex = vertex
             # vertex_weights = vertex_weights
             # pose = pose
-            im = image.half()
+            im = image
 
         with torch.no_grad():
             
@@ -515,7 +515,7 @@ def train_net():
     PVModelDir='/home/gerard/baseline_models/{}_baseline/199.pth'.format(train_cfg['object'])
     PVNet=PVnet(ver_dim=vote_num*2, seg_dim=2)
     PVNet.load_state_dict(torch.load(PVModelDir)['net'])
-    PVNet = PVNet.half()
+    # PVNet = PVNet.half()
     PVNet = DataParallel(PVNet).cuda()
     
     randomCropping = RandomScaleCrop()

@@ -418,51 +418,51 @@ class LineModImageDB(object):
             database.append(data)
 
         ###
-        folder_dir = os.path.join(self.pbr_root, "lm/train_pbr/")
-        folders = os.listdir(folder_dir)
-        modeldb_pbr=LineModModelDB_pbr()
-        center_LM = modeldb.get_centers_3d(self.cls_name)
-        center_PBR = modeldb_pbr.get_centers_3d(self.cls_name)
-        R_ = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
-        T_ = center_PBR - (np.matmul(R_,center_LM)*1000)
-        for scene in folders:
-            with open(os.path.join(folder_dir, scene, "scene_gt.json"), "r") as f:
-                images_info = json.load(f)
-            with open(os.path.join(folder_dir, scene, "scene_camera.json"),"r") as f:
-                Ks_info = json.load(f)
+        # folder_dir = os.path.join(self.pbr_root, "lm/train_pbr/")
+        # folders = os.listdir(folder_dir)
+        # modeldb_pbr=LineModModelDB_pbr()
+        # center_LM = modeldb.get_centers_3d(self.cls_name)
+        # center_PBR = modeldb_pbr.get_centers_3d(self.cls_name)
+        # R_ = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]])
+        # T_ = center_PBR - (np.matmul(R_,center_LM)*1000)
+        # for scene in folders:
+        #     with open(os.path.join(folder_dir, scene, "scene_gt.json"), "r") as f:
+        #         images_info = json.load(f)
+        #     with open(os.path.join(folder_dir, scene, "scene_camera.json"),"r") as f:
+        #         Ks_info = json.load(f)
 
-            num_images = len(images_info)
-            for k in range(num_images):
-                k_str = "{:d}".format(k)
-                image_info = images_info[k_str]
-                num_objs = len(image_info)
-                for idx in range(num_objs):
-                    if image_info[idx]["obj_id"] == self.class_idx+1:
-                        data = {}
-                        data['rgb_pth'] = os.path.join(folder_dir, scene, "rgb/{:06d}.jpg".format(k))
-                        data["dpt_pth"] = os.path.join(folder_dir, scene, "mask_visib", "{:06d}_{:06d}.png".format(k, idx))
-                        mk = read_mask_np(data["dpt_pth"])
-                        y, x = np.nonzero(mk)
-                        if y.shape[0] < 100:
-                            continue
-                        R = np.array(image_info[idx]["cam_R_m2c"], dtype=np.float).reshape(3,3)
-                        T = np.array(image_info[idx]["cam_t_m2c"], dtype=np.float).reshape(3,1) 
-                        RT = np.concatenate([R, T], axis=1)
-                        data["RT"] = RT
-                        data["K"] = np.array(Ks_info[k_str]["cam_K"],dtype=np.float).reshape(3,3)
-                        data["cls_typ"] = self.cls_name
-                        data["rnd_typ"] = "render"
-                        # T_stack = np.transpose(np.vstack((T_,T_,T_,T_,T_,T_,T_,T_)))
-                        # corners = np.transpose(np.matmul(R_,(np.transpose(1000*modeldb.get_corners_3d(self.cls_name)))) + T_stack)
-                        # farthest_3d = np.transpose(np.matmul(R_,(np.transpose(1000*modeldb.get_farthest_3d(self.cls_name)))) + T_stack)
-                        # centers = np.transpose(np.matmul(R_,np.transpose(1000*modeldb.get_centers_3d(self.cls_name)[None,:])) + T_.reshape(3,1))
-                        # data["corners"] = projector.project_K(corners, data["RT"], data["K"])
-                        # data["farthest"] = projector.project_K(farthest_3d, data["RT"], data["K"])
-                        # data["center"] = projector.project_K(centers, data["RT"], data["K"])
-                        data['corners']=projector.project_K(modeldb_pbr.get_corners_3d(self.cls_name),data['RT'], data["K"])
-                        data['farthest']=projector.project_K(modeldb_pbr.get_farthest_3d(self.cls_name),data['RT'], data["K"])
-                        data['center']=projector.project_K(modeldb_pbr.get_centers_3d(self.cls_name)[None,:],data['RT'], data["K"])
-                        database.append(data)
+        #     num_images = len(images_info)
+        #     for k in range(num_images):
+        #         k_str = "{:d}".format(k)
+        #         image_info = images_info[k_str]
+        #         num_objs = len(image_info)
+        #         for idx in range(num_objs):
+        #             if image_info[idx]["obj_id"] == self.class_idx+1:
+        #                 data = {}
+        #                 data['rgb_pth'] = os.path.join(folder_dir, scene, "rgb/{:06d}.jpg".format(k))
+        #                 data["dpt_pth"] = os.path.join(folder_dir, scene, "mask_visib", "{:06d}_{:06d}.png".format(k, idx))
+        #                 mk = read_mask_np(data["dpt_pth"])
+        #                 y, x = np.nonzero(mk)
+        #                 if y.shape[0] < 100:
+        #                     continue
+        #                 R = np.array(image_info[idx]["cam_R_m2c"], dtype=np.float).reshape(3,3)
+        #                 T = np.array(image_info[idx]["cam_t_m2c"], dtype=np.float).reshape(3,1) 
+        #                 RT = np.concatenate([R, T], axis=1)
+        #                 data["RT"] = RT
+        #                 data["K"] = np.array(Ks_info[k_str]["cam_K"],dtype=np.float).reshape(3,3)
+        #                 data["cls_typ"] = self.cls_name
+        #                 data["rnd_typ"] = "render"
+        #                 # T_stack = np.transpose(np.vstack((T_,T_,T_,T_,T_,T_,T_,T_)))
+        #                 # corners = np.transpose(np.matmul(R_,(np.transpose(1000*modeldb.get_corners_3d(self.cls_name)))) + T_stack)
+        #                 # farthest_3d = np.transpose(np.matmul(R_,(np.transpose(1000*modeldb.get_farthest_3d(self.cls_name)))) + T_stack)
+        #                 # centers = np.transpose(np.matmul(R_,np.transpose(1000*modeldb.get_centers_3d(self.cls_name)[None,:])) + T_.reshape(3,1))
+        #                 # data["corners"] = projector.project_K(corners, data["RT"], data["K"])
+        #                 # data["farthest"] = projector.project_K(farthest_3d, data["RT"], data["K"])
+        #                 # data["center"] = projector.project_K(centers, data["RT"], data["K"])
+        #                 data['corners']=projector.project_K(modeldb_pbr.get_corners_3d(self.cls_name),data['RT'], data["K"])
+        #                 data['farthest']=projector.project_K(modeldb_pbr.get_farthest_3d(self.cls_name),data['RT'], data["K"])
+        #                 data['center']=projector.project_K(modeldb_pbr.get_centers_3d(self.cls_name)[None,:],data['RT'], data["K"])
+        #                 database.append(data)
         ###
 
         save_pickle(database,pkl_file)
