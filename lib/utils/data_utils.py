@@ -1252,4 +1252,3 @@ if __name__=="__main__":
     LineModModelDB.compute_farthest_surface_point_3d_num(12)
     LineModModelDB.compute_farthest_surface_point_3d_num(16)
     LineModModelDB.compute_farthest_surface_point_3d_num(20)
-

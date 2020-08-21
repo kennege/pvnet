@@ -227,12 +227,12 @@ class LineModDatasetRealAug(Dataset):
         if self.augment:   
             # plt.figure()
             # plt.imshow(rgb)
-            name = self.imagedb[index]['rgb_pth'].split("/")
+            # name = self.imagedb[index]['rgb_pth'].split("/")
             # fname = '/home/gerard/myPvnet/pvnet/{}'.format(name[-1])
             # plt.savefig(fname)        
             
-            rgb, mask, hcoords = self.randomCropping(rgb, mask, hcoords, 1)  
-            rgb, mask, hcoords = self.augmentation(rgb, mask, hcoords, width, width)
+            # rgb, mask, hcoords = self.randomCropping(rgb, mask, hcoords, 1)  
+            rgb, mask, hcoords = self.augmentation(rgb, mask, hcoords, height, width)
            
             # plt.figure()
             # plt.imshow(rgb)

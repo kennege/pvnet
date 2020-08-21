@@ -517,8 +517,8 @@ def b_inv(b_mat):
         b_inv = eye
     return b_inv
 
-def ransac_voting_layer_v3(mask, vertex, round_hyp_num, inlier_thresh=0.999, confidence=0.99, max_iter=20,
-                           min_num=5, max_num=30000):
+def ransac_voting_layer_v3(mask, vertex, round_hyp_num, inlier_thresh=0.999, confidence=0.999, max_iter=30,
+                           min_num=10, max_num=30000):
     '''
     :param mask:      [b,h,w]
     :param vertex:    [b,h,w,vn,2]

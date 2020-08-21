@@ -13,7 +13,7 @@ import os
 import uuid
 
 from lib.datasets.linemod_dataset import VotingType
-from lib.utils.extend_utils.extend_utils import uncertainty_pnp, find_nearest_point_idx, uncertainty_pnp_v2
+# from lib.utils.extend_utils.extend_utils import uncertainty_pnp, find_nearest_point_idx, uncertainty_pnp_v2
 
 
 def pnp(points_3d, points_2d, camera_matrix,method=cv2.SOLVEPNP_ITERATIVE):
@@ -51,14 +51,15 @@ def pnp(points_3d, points_2d, camera_matrix,method=cv2.SOLVEPNP_ITERATIVE):
 
     return np.concatenate([R, t], axis=-1)
 
-def find_nearest_point_distance(pts1,pts2):
-    '''
-    :param pts1:  pn1,2 or 3
-    :param pts2:  pn2,2 or 3
-    :return:
-    '''
-    idxs=find_nearest_point_idx(pts1,pts2)
-    return np.linalg.norm(pts1[idxs]-pts2,2,1)
+# def find_nearest_point_distance(pts1,pts2):
+#     '''
+
+#     :param pts1:  pn1,2 or 3
+#     :param pts2:  pn2,2 or 3
+#     :return:
+#     '''
+#     idxs=find_nearest_point_idx(pts1,pts2)
+#     return np.linalg.norm(pts1[idxs]-pts2,2,1)
 
 class Evaluator(object):
     def __init__(self):
@@ -161,59 +162,59 @@ class Evaluator(object):
 
         return pose_pred
 
-    def evaluate_uncertainty(self, mean_pts2d, covar, pose_targets, class_type,
-                             intri_type='blender', vote_type=VotingType.BB8,intri_matrix=None):
-        points_3d=VotingType.get_pts_3d(vote_type,class_type)
+    # def evaluate_uncertainty(self, mean_pts2d, covar, pose_targets, class_type,
+    #                          intri_type='blender', vote_type=VotingType.BB8,intri_matrix=None):
+    #     points_3d=VotingType.get_pts_3d(vote_type,class_type)
 
-        begin=time.time()
-        # full
-        cov_invs = []
-        for vi in range(covar.shape[0]):
-            if covar[vi,0,0]<1e-6 or np.sum(np.isnan(covar)[vi])>0:
-                cov_invs.append(np.zeros([2,2]).astype(np.float32))
-                continue
+    #     begin=time.time()
+    #     # full
+    #     cov_invs = []
+    #     for vi in range(covar.shape[0]):
+    #         if covar[vi,0,0]<1e-6 or np.sum(np.isnan(covar)[vi])>0:
+    #             cov_invs.append(np.zeros([2,2]).astype(np.float32))
+    #             continue
 
-            cov_inv = np.linalg.inv(scipy.linalg.sqrtm(covar[vi]))
-            cov_invs.append(cov_inv)
-        cov_invs = np.asarray(cov_invs)  # pn,2,2
-        weights = cov_invs.reshape([-1, 4])
-        weights = weights[:, (0, 1, 3)]
+    #         cov_inv = np.linalg.inv(scipy.linalg.sqrtm(covar[vi]))
+    #         cov_invs.append(cov_inv)
+    #     cov_invs = np.asarray(cov_invs)  # pn,2,2
+    #     weights = cov_invs.reshape([-1, 4])
+    #     weights = weights[:, (0, 1, 3)]
 
-        if intri_type=='use_intrinsic' and intri_matrix is not None:
-            K=intri_matrix
-        else:
-            K=self.projector.intrinsic_matrix[intri_type]
+    #     if intri_type=='use_intrinsic' and intri_matrix is not None:
+    #         K=intri_matrix
+    #     else:
+    #         K=self.projector.intrinsic_matrix[intri_type]
 
-        pose_pred = uncertainty_pnp(mean_pts2d, weights, points_3d, K)
-        model = self.linemod_db.get_ply_model(class_type)
-        diameter = self.linemod_db.get_diameter(class_type)
-        self.uncertainty_pnp_cost.append(time.time()-begin)
+    #     pose_pred = uncertainty_pnp(mean_pts2d, weights, points_3d, K)
+    #     model = self.linemod_db.get_ply_model(class_type)
+    #     diameter = self.linemod_db.get_diameter(class_type)
+    #     self.uncertainty_pnp_cost.append(time.time()-begin)
 
-        if class_type in ['eggbox','glue']:
-            self.add_metric_sym(pose_pred, pose_targets, model, diameter)
-        else:
-            self.add_metric(pose_pred, pose_targets, model, diameter)
+    #     if class_type in ['eggbox','glue']:
+    #         self.add_metric_sym(pose_pred, pose_targets, model, diameter)
+    #     else:
+    #         self.add_metric(pose_pred, pose_targets, model, diameter)
 
-        self.projection_2d(pose_pred, pose_targets, model, K)
-        self.cm_degree_5_metric(pose_pred, pose_targets)
+    #     self.projection_2d(pose_pred, pose_targets, model, K)
+    #     self.cm_degree_5_metric(pose_pred, pose_targets)
 
-        return pose_pred
+    #     return pose_pred
 
-    def evaluate_uncertainty_v2(self, mean_pts2d, covar, pose_targets, class_type,
-                             intri_type='blender', vote_type=VotingType.BB8):
-        points_3d = VotingType.get_pts_3d(vote_type, class_type)
+    # def evaluate_uncertainty_v2(self, mean_pts2d, covar, pose_targets, class_type,
+    #                          intri_type='blender', vote_type=VotingType.BB8):
+    #     points_3d = VotingType.get_pts_3d(vote_type, class_type)
 
-        pose_pred = uncertainty_pnp_v2(mean_pts2d, covar, points_3d, self.projector.intrinsic_matrix[intri_type])
-        model = self.linemod_db.get_ply_model(class_type)
-        diameter = self.linemod_db.get_diameter(class_type)
+    #     pose_pred = uncertainty_pnp_v2(mean_pts2d, covar, points_3d, self.projector.intrinsic_matrix[intri_type])
+    #     model = self.linemod_db.get_ply_model(class_type)
+    #     diameter = self.linemod_db.get_diameter(class_type)
 
-        if class_type in ['eggbox','glue']:
-            self.projection_2d_sym(pose_pred, pose_targets, model, self.projector.intrinsic_matrix[intri_type])
-            self.add_metric_sym(pose_pred, pose_targets, model, diameter)
-        else:
-            self.projection_2d(pose_pred, pose_targets, model, self.projector.intrinsic_matrix[intri_type])
-            self.add_metric(pose_pred, pose_targets, model, diameter)
-        self.cm_degree_5_metric(pose_pred, pose_targets)
+    #     if class_type in ['eggbox','glue']:
+    #         self.projection_2d_sym(pose_pred, pose_targets, model, self.projector.intrinsic_matrix[intri_type])
+    #         self.add_metric_sym(pose_pred, pose_targets, model, diameter)
+    #     else:
+    #         self.projection_2d(pose_pred, pose_targets, model, self.projector.intrinsic_matrix[intri_type])
+    #         self.add_metric(pose_pred, pose_targets, model, diameter)
+    #     self.cm_degree_5_metric(pose_pred, pose_targets)
 
     def average_precision(self,verbose=True):
         np.save('tmp.npy',np.asarray(self.proj_mean_diffs))
