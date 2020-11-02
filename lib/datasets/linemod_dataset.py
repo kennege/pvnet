@@ -205,7 +205,7 @@ class LineModDatasetRealAug(Dataset):
 
     def __getitem__(self, index_tuple):
         index, height, width = index_tuple
-        
+
         rgb_path = os.path.join(self.data_prefix,self.imagedb[index]['rgb_pth'])
         mask_path = os.path.join(self.data_prefix,self.imagedb[index]['dpt_pth'])
 

@@ -6,7 +6,7 @@ from transforms3d.euler import euler2mat
 from skimage.io import imsave
 
 
-def visualize_bounding_box(rgb, corners_pred, t, corners_targets=None, centers_pred=None, centers_targets=None, save=True, save_fn=None):
+def visualize_bounding_box(rgb, corners_pred_list, center, i, train_cfg, corners_targets=None, centers_pred=None, centers_targets=None, save=True, save_fn=None):
     '''
 
     :param rgb:             torch tensor with size [b,3,h,w] or numpy array with size [b,h,w,3]
@@ -18,32 +18,54 @@ def visualize_bounding_box(rgb, corners_pred, t, corners_targets=None, centers_p
     :param save_fn:
     :return:
     '''
+    mean=[0.485, 0.456, 0.406]
+    std=[0.229, 0.224, 0.225]
     if isinstance(rgb, torch.Tensor):
         rgb = rgb.permute(0, 2, 3, 1).detach().cpu().numpy()
-    rgb = rgb.astype(np.uint8)
 
-    batch_size = corners_pred.shape[0]
-    for idx in range(batch_size):
-        _, ax = plt.subplots(1)
-        ax.imshow(rgb[idx])
-        ax.add_patch(
-            patches.Polygon(xy=corners_pred[idx, 0][[0, 1, 3, 2, 0, 4, 6, 2]], fill=False, linewidth=1, edgecolor='b'))
-        ax.add_patch(
-            patches.Polygon(xy=corners_pred[idx, 0][[5, 4, 6, 7, 5, 1, 3, 7]], fill=False, linewidth=1, edgecolor='b'))
+    crop_size = 60
+    fig, axs = plt.subplots(1,4, figsize=(21, 5), facecolor='w', edgecolor='k')
+    fig.subplots_adjust(hspace = .5, wspace=.001)
+    axs = axs.ravel()
+    im = rgb[0]
+    im = ((im*std)+mean)
+    corners_target = corners_targets[0,0]
+    corners_target[:,0] = corners_target[:,0] - center[0] + crop_size 
+    corners_target[:,1] = corners_target[:,1] - center[1] + crop_size      
+    for idx in range(len(corners_pred_list)):
+        cropped_im = im[int(center[1] - crop_size):int(center[1]+crop_size), int(center[0]-crop_size):int(center[0]+crop_size)]
+        
+        corners_pred = corners_pred_list[idx][0,0]
+        corners_pred[:,0] = corners_pred[:,0] - center[0] + crop_size
+        corners_pred[:,1] = corners_pred[:,1] - center[1] + crop_size
+
+        axs[idx].imshow(cropped_im) 
+        axs[idx].add_patch(
+            patches.Polygon(xy=corners_pred[[0, 1, 3, 2, 0, 4, 6, 2]], fill=False, linewidth=6, edgecolor='b'))
+        axs[idx].add_patch(
+            patches.Polygon(xy=corners_pred[[5, 4, 6, 7, 5, 1, 3, 7]], fill=False, linewidth=6, edgecolor='b'))
         if corners_targets is not None:
-            ax.add_patch(patches.Polygon(xy=corners_targets[idx, 0][[0, 1, 3, 2, 0, 4, 6, 2]], fill=False, linewidth=1,
+            axs[idx].add_patch(patches.Polygon(xy=corners_target[[0, 1, 3, 2, 0, 4, 6, 2]], fill=False, linewidth=6,
                                          edgecolor='g'))
-            ax.add_patch(patches.Polygon(xy=corners_targets[idx, 0][[5, 4, 6, 7, 5, 1, 3, 7]], fill=False, linewidth=1,
+            axs[idx].add_patch(patches.Polygon(xy=corners_target[[5, 4, 6, 7, 5, 1, 3, 7]], fill=False, linewidth=6,
                                          edgecolor='g'))
         if centers_pred is not None:
-            ax.plot(centers_pred[idx, 0, 0],centers_pred[idx, 0, 1],'*')
+            axs[idx].plot(centers_pred[0, 0, 0],centers_pred[0, 0, 1],'*')
         if centers_targets is not None:
-            ax.plot(centers_targets[idx, 0, 0], centers_pred[idx, 0, 1], '*')
-        if not save:
-            plt.show()
-        else:
-            plt.savefig('/home/gerard/bb_{}.jpg'.format(t))
-        plt.close()
+            axs[idx].plot(centers_targets[0, 0, 0], centers_pred[0, 0, 1], '*')
+        
+        # axs[idx].set_title('{}'.format(idx))
+        axs[idx].set_axis_off()
+        # plt.margins(0,0)
+        plt.gca().set_axis_off()
+        plt.subplots_adjust(top = 1, bottom = 0, right = 1, left = 0, 
+            hspace = 0.1, wspace = 0)
+    if not save:
+        plt.show()
+    else:
+        plt.savefig('/home/gerard/bb_{}_{}.png'.format(train_cfg['object'],i),bbox_inches='tight', pad_inches=0)
+        plt.savefig('/home/gerard/bb_{}_{}.eps'.format(train_cfg['object'],i),format='eps',bbox_inches='tight', pad_inches=0)
+    plt.close()
 
 def visualize_mask(mask_pred,mask_gt, save=False, save_fn=None):
     '''

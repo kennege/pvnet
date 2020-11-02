@@ -4,25 +4,30 @@
   "network":"resnet18_8s",
   "gadi":false,
   
-  "object":"glue",
-  "exp_name":"2008",
-  "sigma":1,
-  "train_iterations":1,
+  "object":"ape",
+  "exp_name":"2109",
+  "sigma":0.6,
+  "train_iterations":2,
   "skips":1,
 
-  "delta":0.01, 
+  "delta":1.2, 
   "eval_iterations":1, 
+  "initial_est":"pvnet",
+  "model_dir":"training",
+  "wolfe":false,
+  "plot":true,
+  "save_bb":false,
 
   "crop_factor":1,
 
   "lr":1e-3,
   "lr_decay_rate":0.85,
   "lr_decay_epoch":10,
-  "train_batch_size":64,
+  "train_batch_size":128,
   "test_batch_size":1,
   "motion_model":false,
 
-  "resume":true,
+  "resume":false,
   "finetune":false,
   "epoch_num":50,
 

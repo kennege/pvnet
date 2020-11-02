@@ -98,6 +98,8 @@ class ImageEncoder(nn.Module):
             nn.BatchNorm2d(fcdim),
             nn.ReLU(True)
         )
+        resnet18_8s.conv1 = nn.Conv2d(5, 64, kernel_size=7, stride=2, padding=3,
+                               bias=False)
         self.resnet18_8s = resnet18_8s
 
     def forward(self, x, feature_alignment=False):
@@ -184,7 +186,7 @@ class ImageDecoder(nn.Module):
         self.up2storaw = nn.UpsamplingBilinear2d(scale_factor=2)
 
         self.convraw = nn.Sequential(
-            nn.Conv2d(3+s2dim, raw_dim, 3, 1, 1, bias=False),
+            nn.Conv2d(5+s2dim, raw_dim, 3, 1, 1, bias=False),
             nn.BatchNorm2d(raw_dim),
             nn.LeakyReLU(0.1,True),
             nn.Conv2d(raw_dim, seg_dim+ver_dim, 1, 1)
@@ -256,7 +258,6 @@ class EstimateDecoder(nn.Module):
     def forward(self, x, x2s, x4s, x8s, xfc):
         fm=self.conv8s(torch.cat([xfc,x8s],1))
         fm=self.up8sto4s(fm)
-
         fm=self.conv4s(torch.cat([fm,x4s],1))
         fm=self.up4sto2s(fm)
 
@@ -276,7 +277,6 @@ class ImageUNet(nn.Module):
         self.imageDecoder = ImageDecoder(ver_dim, seg_dim, fcdim, s8dim, s4dim, s2dim, raw_dim)
 
     def forward(self, img, x2sEst, x4sEst, x8sEst, xfcEst):
-        # with torch.no_grad():
         x2sIm, x4sIm, x8sIm, xfcIm = self.imageEncoder(img)       
         seg_pred, q_pred = self.imageDecoder(img, x2sIm, x4sIm, x8sIm, xfcIm, x2sEst, x4sEst, x8sEst, xfcEst)
 
@@ -290,7 +290,6 @@ class EstimateUNet(nn.Module):
 
     def forward(self, vertexEst):
         x2sEst, x4sEst, x8sEst, xfcEst = self.estimateEncoder(vertexEst)
-        # with torch.no_grad():
         ver_pred, x2s, x4s, x8s = self.estimateDecoder(vertexEst, x2sEst, x4sEst, x8sEst, xfcEst)
 
         return ver_pred, x2s, x4s, x8s, xfcEst

@@ -22,7 +22,7 @@ from lib.ransac_voting_gpu_layer.ransac_voting_gpu import ransac_voting_layer_v3
     estimate_voting_distribution_with_mean, ransac_voting_layer_v5, ransac_motion_voting
 from lib.networks.model_repository import *
 from lib.datasets.linemod_dataset import LineModDatasetRealAug, ImageSizeBatchSampler, VotingType, RandomScaleCrop
-from lib.utils.data_utils import LineModImageDB, OcclusionLineModImageDB, TruncatedLineModImageDB
+from lib.utils.data_utils import LineModImageDB, LineModModelDB, OcclusionLineModImageDB, TruncatedLineModImageDB, Projector
 from lib.utils.arg_utils import args
 from lib.utils.draw_utils import visualize_bounding_box, imagenet_to_uint8, visualize_mask, visualize_points, img_pts_to_pts_img
 from lib.utils.base_utils import save_pickle
@@ -31,7 +31,7 @@ import json
 from lib.utils.evaluation_utils import Evaluator
 from lib.utils.net_utils import AverageMeter, Recorder, smooth_l1_loss, \
     load_model, save_model, adjust_learning_rate, compute_precision_recall, set_learning_rate,\
-         compute_step_size, perturb_gt_input, load_pretrained_estNet, load_model_estNet, load_model_imNet, \
+        load_pretrained_estNet, load_model_estNet, load_model_imNet, \
              save_model_estNet, save_model_imNet, load_pretrained_imNet
 
 from lib.utils.config import cfg
@@ -52,7 +52,6 @@ import random
 import numpy as np
 import time
 from gerards_functions import *
-
 
 with open(args.cfg_file,'r') as f:
     train_cfg=json.load(f)
@@ -104,7 +103,7 @@ class NetWrapper(nn.Module):
 
     def forward(self, image, mask, vertex, vertex_weights, vertex_init_pert, vertex_init):      
         
-        vertex_pred, x2s, x4s, x8s, xfc = self.estNet(vertex_weights * vertex_init_pert) #
+        vertex_pred, x2s, x4s, x8s, xfc = self.estNet(vertex_weights * vertex_init_pert)
         seg_pred, q_pred = self.imNet(image, x2s, x4s, x8s, xfc)
 
         loss_q = smooth_l1_loss(q_pred,(vertex_init-vertex), vertex_weights, reduce=False) 
@@ -139,7 +138,7 @@ class UncertaintyEvalWrapper(nn.Module):
         b,h,w,vn_2=vertex_pred.shape
         vertex_pred=vertex_pred.view(b,h,w,vn_2//2,2)
 
-        mean=ransac_voting_layer_v3(mask_pred, vertex_pred, 512, inlier_thresh=0.99)
+        mean=ransac_voting_layer_v3(mask_pred, vertex_pred, 512, inlier_thresh=0.999)
         mean, var=estimate_voting_distribution_with_mean(mask_pred,vertex_pred,mean)
         return mean, var
 
@@ -159,18 +158,28 @@ def train(net, PVNet, optimizer, dataloader, epoch):
     PVNet.eval()
     for idx, data in enumerate(dataloader):
         image, mask, vertex, vertex_weights,_,hcoords = [d for d in data]
-        image = image.cuda()
+        image = image.cuda()       
+        im = image#.half()
+
+        # add u,v channels
+        b, _, h, w = image.shape
+        uv_map = torch.ones(2, h, w)
+        v_coor = torch.linspace(-1, 1, h).view(h, 1)
+        uv_map[0, ...] = torch.ones(h, w) * v_coor
+        u_coor = torch.linspace(-1, 1, w).view(1, w)
+        uv_map[1, ...] = torch.ones(h, w) * u_coor
+        padded_uv_map = torch.ones(b, 2, h, w)*uv_map
+        image = torch.cat((image,padded_uv_map.cuda()),1)
+        
         mask = mask.cuda()
         vertex = vertex.cuda()
         vertex_weights = vertex_weights.cuda()        
-        im = image#.half()
         data_time.update(time.time()-end)
         with torch.no_grad():
             _, vertex_init_out = PVNet(im)
             vertex_init = vertex_init_out.float()
-            del vertex_init_out
 
-            vertex_init_pert = vertex_init#perturb_gt_input(vertex_init, hcoords.cpu(), mask)
+            vertex_init_pert = vertex_init
 
         for i in range(iterations):
             _, _,q_pred, loss, precision, recall = net(image.detach(), mask.detach(), vertex.detach(), vertex_weights.detach(), vertex_init_pert.detach(), vertex_init.detach())
@@ -197,17 +206,16 @@ def train(net, PVNet, optimizer, dataloader, epoch):
                 batch_time.reset()
 
             vertex_init = (vertex_init - (sigma*q_gt))
-        #     torch.cuda.empty_cache()
-        #     gc.collect()
-        # del vertex, loss, q_gt, vertex_weights, mask        
-        # torch.cuda.empty_cache()
-        # gc.collect()
         
     print('epoch {} training cost {} s'.format(epoch,time.time()-train_begin))
     
 
-def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_intrinsic=False, use_motion=False):
+def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='test', use_camera_intrinsic=False, use_motion=False):
     for rec in recs: rec.reset()
+
+    db = LineModModelDB()
+    corners = db.get_corners_3d(args.linemod_cls)
+    corners = np.hstack([corners, np.ones((corners.shape[0], 1))])
 
     test_begin = time.time()
     eval_net=DataParallel(EvalWrapper().cuda()) if not use_motion else DataParallel(MotionEvalWrapper().cuda())
@@ -217,13 +225,13 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
     iterations = train_cfg["eval_iterations"] + 1
 
     evaluatorList = []
-    losses_vertex = np.zeros(int((iterations)))# /train_cfg["skips"])+(train_cfg["skips"]-1)))
-    losses_q = np.zeros(int((iterations)))# /train_cfg["skips"])+(train_cfg["skips"]-1)))
-    norm_q = np.zeros(int((iterations)))# /train_cfg["skips"])+(train_cfg["skips"]-1)))
-    norm_v = np.zeros(int((iterations)))# /train_cfg["skips"])+(train_cfg["skips"]-1)))
-    deltas = np.zeros(int((iterations)))# /train_cfg["skips"])+(train_cfg["skips"]-1)))
+    losses_vertex = np.zeros(int((iterations)))
+    losses_q = np.zeros(int((iterations)))
+    norm_q = np.zeros(int((iterations)))
+    norm_v = np.zeros(int((iterations)))
+    deltas = np.zeros(int((iterations)))
+    pose_diffs = np.zeros(int(iterations))
     for i in range(iterations):
-        # if (i % train_cfg["skips"]==0) or (i==0):
         evaluatorList.append(Evaluator())
 
     data_counter = 0   
@@ -233,37 +241,47 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
             image, mask, vertex, vertex_weights, pose, corner_target, Ks = [d.cuda() for d in data]
         else:
             image, mask, vertex, vertex_weights, pose, corner_target = [d.cuda() for d in data]           
-
         with torch.no_grad():
             
             pose=pose.cpu().numpy()
             delta = train_cfg["delta"]
             id = 0
+            corner_pred_list = []
             for t in range(iterations): 
                 if t==0:
                     seg_pred, vertex_init = PVNet(image)
                     mask_init = torch.argmax(seg_pred,1)
-                    vertex_init = vertex_init.float()
+                    # vertex_init = vertex_init.float()
+                    vertex_init = perturb_vertex_input(vertex_init, mask_init)
                 else: 
                     vertex_init_pert = vertex_init
+                    start = time.time()
+
+                    # add u,v channels
+                    b, _, h, w = image.shape
+                    uv_map = torch.ones(2, h, w)
+                    v_coor = torch.linspace(-1, 1, h).view(h, 1)
+                    uv_map[0, ...] = torch.ones(h, w) * v_coor
+                    u_coor = torch.linspace(-1, 1, w).view(1, w)
+                    uv_map[1, ...] = torch.ones(h, w) * u_coor
+                    padded_uv_map = torch.ones(b, 2, h, w)*uv_map
+                    image = torch.cat((image,padded_uv_map.cuda()),1)
+
                     _, _, q_pred, loss, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init_pert.detach(), vertex_init.detach())
+                    end = time.time()
                     loss, precision, recall=[torch.mean(val) for val in ( loss, precision, recall)]
-                    # losses_seg[t] = losses_seg[t] + loss_seg      
-                    # losses_vertex[id] = losses_vertex[id] + loss_vertex
-                    # losses_q[id] = losses_q[id] + loss_q
                     
                     # q_gt = vertex_init - vertex
                     norm_q[id] = norm_q[id] + ((1/torch.sum(vertex_weights).cpu().numpy()) * \
                         (np.linalg.norm((vertex_weights.cpu().numpy() * (q_pred.cpu().numpy()  - (vertex_init.cpu().numpy() - vertex.cpu().numpy())))**2)))
 
                     if t>0:
-                        # print(delta)
                        
-                        # delta = compute_step_size(delta, vertex_init.detach(), vertex_weights.detach(), q_pred.detach(), train_cfg,t)
+                        if train_cfg['wolfe']: 
+                            delta = compute_step_size(delta, vertex_init.detach(), vertex_weights.detach(), q_pred.detach(), train_cfg,t)
                         deltas[id] = deltas[id] + delta
-                        # if not  delta == 0:
                         vertex_init = vertex_init - (delta*q_pred)
-                        # vertex_init = normalise_vector_field(vertex_init,vertex_init0)
+                      # vertex_init = normalise_vector_field(vertex_init,vertex_init0)
 
                     # if data_counter==1000:
                     #     plot_mask_vfield(image, rgb_pth, mask_init, mask_pth, vertex_init, t)               
@@ -272,41 +290,70 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
                             (np.linalg.norm((vertex_weights.cpu().numpy() * (vertex_init.cpu().numpy()- vertex.cpu().numpy())))**2)) 
 
                 if not train_cfg["gadi"]:
-                    if args.use_uncertainty_pnp:
-                        mean,cov_inv=uncertain_eval_net(mask_init,vertex_init)
-                        mean=mean.cpu().numpy()
-                        cov_inv=cov_inv.cpu().numpy()
-                    else: 
-                        corner_pred=eval_net(mask_init,vertex_init).cpu().detach().numpy()
+                    # if args.use_uncertainty_pnp:
+                    mean,cov_inv=uncertain_eval_net(mask_init,vertex_init)
+                    mean=mean.cpu().numpy()
+                    cov_inv=cov_inv.cpu().numpy()
+                    # else: 
+                    # corner_pred=eval_net(mask_init,vertex_init).cpu().detach().numpy()
                         
                     b=pose.shape[0]
                     pose_preds=[]
                     for bi in range(b):
                         intri_type='use_intrinsic' if use_camera_intrinsic else 'linemod'
                         K=Ks[bi].cpu().numpy() if use_camera_intrinsic else None
-                        if args.use_uncertainty_pnp:
-                            pose_preds.append(evaluatorList[id].evaluate_uncertainty(mean[bi],cov_inv[bi],pose[bi],args.linemod_cls,
-                                                                        intri_type,vote_type,intri_matrix=K))
-                        else:
-                            pose_preds.append(evaluatorList[id].evaluate(corner_pred[bi],pose[bi],args.linemod_cls,intri_type,
-                                vote_type,intri_matrix=K))
+                        # if args.use_uncertainty_pnp:
+                        pose_preds.append(evaluatorList[id].evaluate_uncertainty(mean[bi],cov_inv[bi],pose[bi],args.linemod_cls,
+                                                                    intri_type,vote_type,intri_matrix=K))
+                        # else:
+                        # pose_preds.append(evaluatorList[id].evaluate(corner_pred[bi],pose[bi],args.linemod_cls,intri_type,
+                        #     vote_type,intri_matrix=K))
+                        Rt = np.array(pose_preds)[0]
+                        pose_mat_pred = np.vstack([Rt,[0,0,0,1]])                                                
+                        pose_mat = np.vstack([pose[bi],[0,0,0,1]])
+                        I4 = np.identity(4)
+                        pose_diff = np.linalg.norm(I4 - np.matmul(pose_mat, np.linalg.inv(pose_mat_pred)),'fro')**2
+                        pose_diffs[id] = pose_diffs[id] + pose_diff
+                        # print(pose_diff)
+
+                        if train_cfg['save_bb']:
+
+                            projecter = Projector()
+                            K = projecter.intrinsic_matrix['linemod']
+                            corner_gt = np.matmul(pose[bi], np.transpose(corners))
+                            corner_pred = np.matmul(pose_preds[-1], np.transpose(corners))
+                            center = np.matmul(K, np.transpose(pose[bi][:,3]))
+                            center = center / center[2]
+                            corner_gt = np.matmul(K, corner_gt)
+                            corner_pred = np.matmul(K, corner_pred)
+                            corner_gt = np.vstack([corner_gt[0,:]/corner_gt[2,:], corner_gt[1,:]/corner_gt[2,:]])
+                            corner_pred = np.vstack([corner_pred[0, :] / corner_pred[2, :], corner_pred[1, :] / corner_pred[2, :]])
+                            corner_pred = np.transpose(corner_pred)
+                            corner_gt = np.transpose(corner_gt)
+                            corner_pred = corner_pred[np.newaxis,np.newaxis,...]
+                            corner_gt = corner_gt[np.newaxis,np.newaxis,...]
+                            corner_pred_list.append(corner_pred)
+                            if t == (iterations - 1):
+                                visualize_bounding_box(image,corner_pred_list,center,idx,train_cfg,corners_targets=corner_gt)
+                        
             
                 if t>0:
                     vals=[loss,precision,recall]
                     for rec,val in zip(recs,vals): rec.update(val)
 
-                if t==0:
-                    corners_init = corner_pred[np.newaxis,...]
-                if t==iterations-1:
-                    corners_end = corner_pred[np.newaxis,...]
-                    visualize_bounding_box(image,corners_init,t,corners_targets=corners_end)
+                # if t==0:
+                #     corners_init = corner_pred[np.newaxis,...]
+                # if t==iterations-1:
+                #     corners_end = corner_pred[np.newaxis,...]
+                
+                
                 id+=1 
-            # print(delta)
 
         data_counter+=1
     
     proj_err_list = []
     add_list = []
+    pose_list = []
     p_increase_add = 0
     p_decrease_v = 0
     p_decrease_q = 0 
@@ -314,15 +361,20 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
     first_v = []    
     id = 0
     for i in range(iterations):
+            
         proj_err,add,cm=evaluatorList[id].average_precision(False)
         norm_q[id] = norm_q[id] / len(dataloader)
-        norm_v[id] = norm_v[id] / len(dataloader)           
+        norm_v[id] = norm_v[id] / len(dataloader)  
+        pose_diffs[id] = pose_diffs[id] / len(dataloader)          
         proj_err_list.append(proj_err)
         add_list.append(add)
         deltas[id] = deltas[id] / len(dataloader)
+        print(pose_diffs[id])
         id+=1
 
     print(train_cfg['exp_name'])
+    print(train_cfg['model_name'])
+    print(train_cfg['object'])
     print('delta: ',train_cfg['delta'])
     print('iterations: ',train_cfg['eval_iterations'])    
     print('X-X^ list: ',norm_v)
@@ -335,7 +387,8 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
     print('add percentage increase ', p_increase_add)
     print('Proj percentage increase: ',p_decrease_p)
 
-#    plot_results(train_cfg, add_list, epoch, val_prefix)
+    if train_cfg['plot']:
+        plot_results(train_cfg, add_list, norm_v, pose_diffs, epoch, val_prefix)
 
 
     with torch.no_grad():
@@ -368,15 +421,17 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='val', use_camera_
 
     print('epoch {} {} cost {} s'.format(epoch,val_prefix,time.time()-test_begin))
 
-    return add_list, first_a, first_v, add_list[-1], norm_v[-1], proj_err_list[-1], p_increase_add, p_decrease_v, p_decrease_q
+    return add_list, add_list[0], norm_v[0], add_list[-1], norm_v[-1], proj_err_list[-1], p_increase_add, p_decrease_v, p_decrease_q
     
 def train_net():
 
     tf_dir = './runs/' + train_cfg['exp_name']
     writer = SummaryWriter(log_dir=tf_dir)
     # Path("/home/gerard/myPvnet/pvnet/{}".format(train_cfg["exp_name"])).mkdir(parents=True, exist_ok=True)
-    model_dir=os.path.join(cfg.MODEL_DIR,train_cfg['model_name'])
-    # model_dir = '/home/gerard/wacvModels/{}'.format(train_cfg['object'])
+    if train_cfg["model_dir"] == "training":
+        model_dir=os.path.join(cfg.MODEL_DIR,train_cfg['model_name'])
+    elif train_cfg["model_dir"] == "wacv":
+        model_dir = '/home/gerard/wacvModels/{}'.format(train_cfg['object'])
     folders = model_dir.split(train_cfg['model_name'])
     # resultsFileName = folders[0] + "{}_eval.txt".format(train_cfg['model_name'])
     # resultsFile = open(resultsFileName,"a+")
@@ -386,8 +441,10 @@ def train_net():
     net=NetWrapper(imNet,estNet)
     net=DataParallel(net).cuda()
 
-    PVModelDir='/home/gerard/baseline_models/{}_baseline/199.pth'.format(train_cfg['object'])
-    # PVModelDir='/home/gerard/xin_models/SEP_orgArc_{}_linemod_train/99.pth'.format(train_cfg['object'])
+    if train_cfg["initial_est"] == "pvnet":
+        PVModelDir='/home/gerard/baseline_models/{}_baseline/199.pth'.format(train_cfg['object'])
+    elif train_cfg["initial_est"] == "xin":
+        PVModelDir='/home/gerard/xin_models/SEP_orgArc_{}_linemod_train/99.pth'.format(train_cfg['object'])
     PVNet=PVnet(ver_dim=vote_num*2, seg_dim=2)
     PVNet.load_state_dict(torch.load(PVModelDir)['net'])
     # PVNet = PVNet.half()
@@ -409,14 +466,14 @@ def train_net():
     test_sampler = SequentialSampler(test_set)
     test_batch_sampler = ImageSizeBatchSampler(test_sampler, train_cfg['test_batch_size'], False)
     test_loader = DataLoader(test_set, batch_sampler=test_batch_sampler, num_workers=16)
-    if args.linemod_cls in cfg.occ_linemod_cls_names:
-        occ_image_db = OcclusionLineModImageDB(args.linemod_cls)
-        occ_test_db = occ_image_db.test_real_set
-        occ_test_set = LineModDatasetRealAug(occ_test_db, randomCropping, cfg.OCCLUSION_LINEMOD, vote_type,
-                                                augment=False, use_motion=motion_model)
-        occ_test_sampler = SequentialSampler(occ_test_set)
-        occ_test_batch_sampler = ImageSizeBatchSampler(occ_test_sampler, train_cfg['test_batch_size'], False)
-        occ_test_loader = DataLoader(occ_test_set, batch_sampler=occ_test_batch_sampler, num_workers=16)
+    # if args.linemod_cls in cfg.occ_linemod_cls_names:
+    #     occ_image_db = OcclusionLineModImageDB(args.linemod_cls)
+    #     occ_test_db = occ_image_db.test_real_set
+    #     occ_test_set = LineModDatasetRealAug(occ_test_db, randomCropping, cfg.OCCLUSION_LINEMOD, vote_type,
+    #                                             augment=False, use_motion=motion_model)
+    #     occ_test_sampler = SequentialSampler(occ_test_set)
+    #     occ_test_batch_sampler = ImageSizeBatchSampler(occ_test_sampler, train_cfg['test_batch_size'], False)
+    #     occ_test_loader = DataLoader(occ_test_set, batch_sampler=occ_test_batch_sampler, num_workers=16)
         
     if args.test_model:
         begin_epoch=load_model(net.module.imNet, net.module.estNet, optimizer, model_dir, args.load_epoch)
@@ -430,18 +487,18 @@ def train_net():
             val_sampler = SequentialSampler(val_set)
             val_batch_sampler = ImageSizeBatchSampler(val_sampler, train_cfg['test_batch_size'], False, cfg=train_cfg['aug_cfg'])
             val_loader = DataLoader(val_set, batch_sampler=val_batch_sampler, num_workers=16)
-            # print('test with val loader')
-            # _,_,_,_,_,_,_,_,_ = val(net, PVNet, val_loader, begin_epoch, lr, writer, use_motion=motion_model)           
+            print('test with val loader')
+            _,_,_,_,_,_,_,_,_ = val(net, PVNet, val_loader, begin_epoch, lr, writer, use_motion=motion_model)           
             
             prefix='test' if args.use_test_set else 'val'
             print('test with test_loader')
             _,_,_,_,_,_,_,_,_ = val(net, PVNet, test_loader, begin_epoch, lr, writer, use_motion=motion_model)
 
-        if args.occluded and args.linemod_cls in cfg.occ_linemod_cls_names:
-            print('testing occluded linemod ...')
+        # if args.occluded and args.linemod_cls in cfg.occ_linemod_cls_names:
+        #     print('testing occluded linemod ...')
             
-            prefix='occ_test' if args.use_test_set else 'occ_val'
-            _,_,_,_,_,_,_,_,_ = val(net, PVNet, occ_test_loader, begin_epoch, lr, writer, prefix, use_motion=motion_model)
+        #     prefix='occ_test' if args.use_test_set else 'occ_val'
+        #     _,_,_,_,_,_,_,_,_ = val(net, PVNet, occ_test_loader, begin_epoch, lr, writer, prefix, use_motion=motion_model)
 
         if args.truncated:
             print('testing truncated linemod ...')
@@ -488,13 +545,13 @@ def train_net():
         val_batch_sampler = ImageSizeBatchSampler(val_sampler, train_cfg['test_batch_size'], False, cfg=train_cfg['aug_cfg'])
         val_loader = DataLoader(val_set, batch_sampler=val_batch_sampler, num_workers=16)
 
-        if args.linemod_cls in cfg.occ_linemod_cls_names:
-            occ_image_db=OcclusionLineModImageDB(args.linemod_cls)
-            occ_val_db=occ_image_db.test_real_set[:len(occ_image_db.test_real_set)//2]
-            occ_val_set = LineModDatasetRealAug(occ_val_db, randomCropping, cfg.OCCLUSION_LINEMOD, vote_type, augment=False, cfg=train_cfg['aug_cfg'], use_motion=motion_model)
-            occ_val_sampler = SequentialSampler(occ_val_set)
-            occ_val_batch_sampler = ImageSizeBatchSampler(occ_val_sampler, train_cfg['test_batch_size'], False, cfg=train_cfg['aug_cfg'])
-            occ_val_loader = DataLoader(occ_val_set, batch_sampler=occ_val_batch_sampler, num_workers=16)
+        # if args.linemod_cls in cfg.occ_linemod_cls_names:
+        #     occ_image_db=OcclusionLineModImageDB(args.linemod_cls)
+        #     occ_val_db=occ_image_db.test_real_set[:len(occ_image_db.test_real_set)//2]
+        #     occ_val_set = LineModDatasetRealAug(occ_val_db, randomCropping, cfg.OCCLUSION_LINEMOD, vote_type, augment=False, cfg=train_cfg['aug_cfg'], use_motion=motion_model)
+        #     occ_val_sampler = SequentialSampler(occ_val_set)
+        #     occ_val_batch_sampler = ImageSizeBatchSampler(occ_val_sampler, train_cfg['test_batch_size'], False, cfg=train_cfg['aug_cfg'])
+        #     occ_val_loader = DataLoader(occ_val_set, batch_sampler=occ_val_batch_sampler, num_workers=16)
 
         add_list_list = []
         p_inc_list = []
@@ -506,51 +563,54 @@ def train_net():
         first_a_list = []
         first_v_list = []
         epoch_count = 0
+        print(model_dir)
         for epoch in range(begin_epoch, train_cfg['epoch_num']):
             adjust_learning_rate(optimizer,epoch,train_cfg['lr_decay_rate'],train_cfg['lr_decay_epoch'])
             for param_group in optimizer.param_groups:
                 lr = param_group['lr']
-            # train(net, PVNet, optimizer, train_loader, epoch)
+            train(net, PVNet, optimizer, train_loader, epoch)
 
-            if not train_cfg["gadi"]:
-
-                add_list, first_a, first_v, final_a, final_v, final_p, p_inc_add, p_dec_v, p_dec_q = val(net, PVNet, test_loader, epoch, lr, writer, use_motion=motion_model)
-                if (train_cfg['eval_epoch']
-                    and epoch%train_cfg['eval_inter']==0
-                    and epoch>=train_cfg['eval_epoch_begin']) or args.test_model: 
-                    if epoch >=30:
-                        add_list_list.append(add_list)
-                        first_a_list.append(first_a)
-                        first_v_list.append(first_v)
-                        p_inc_list.append(p_inc_add)
-                        p_dec_v_list.append(p_dec_v)
-                        p_dec_q_list.append(p_dec_q)
-                        final_a_list.append(final_a)
-                        final_v_list.append(final_v)
-                        final_p_list.append(final_p)
+            print('testing')
+            add_list, first_a, first_v, final_a, final_v, final_p, p_inc_add, p_dec_v, p_dec_q = val(net, PVNet, test_loader, epoch, lr, writer, use_motion=motion_model)
+            # if (train_cfg['eval_epoch']
+            #     and epoch%train_cfg['eval_inter']==0
+            #     and epoch>=train_cfg['eval_epoch_begin']) or args.test_model: 
+            # if epoch >=30:
+            add_list_list.append(add_list)
+            first_a_list.append(first_a)
+            first_v_list.append(first_v)
+            p_inc_list.append(p_inc_add)
+            p_dec_v_list.append(p_dec_v)
+            p_dec_q_list.append(p_dec_q)
+            final_a_list.append(final_a)
+            final_v_list.append(final_v)
+            final_p_list.append(final_p)
+            print(final_a_list)
             
-            fileLine = "Date/time: {}. Epoch: {}. ADD: {}. 2D Proj: {} ".format(date.today(),epoch,final_a,final_p)
-            if args.linemod_cls in cfg.occ_linemod_cls_names:
-                print('occ')
-                _,_,_, final_a_occ, _,_,_,_,_ = val(net, PVNet, occ_test_loader, epoch, lr, writer, 'occ_val',use_motion=motion_model)
-                fileLine = fileLine + "Occ ADD: {}.".format(final_a_occ)
-            fileLine = fileLine + '\n'
+            # fileLine = "Date/time: {}. Epoch: {}. ADD: {}. 2D Proj: {} ".format(date.today(),epoch,final_a,final_p)
+            # if args.linemod_cls in cfg.occ_linemod_cls_names:
+            #     print('occ')
+            #     _,_,_, final_a_occ, _,_,_,_,_ = val(net, PVNet, occ_test_loader, epoch, lr, writer, 'occ_val',use_motion=motion_model)
+            #     fileLine = fileLine + "Occ ADD: {}.".format(final_a_occ)
+            # fileLine = fileLine + '\n'
             # resultsFile.write(fileLine)
             
             print('current model: ',os.path.join(model_dir, '{}.pth'.format(epoch)))
-            print('---------------------------------------------')
-            # save_model(net.module.imNet, net.module.estNet, optimizer, epoch, model_dir)
-            
+            save_model(net.module.imNet, net.module.estNet, optimizer, epoch, model_dir)
+            print('---------------------------------------------')            
             epoch_count+=1
-        if ~train_cfg['gadi']:
-            print(train_cfg['exp_name'])
-            print('PVNet ADD. mean: {} +/- {}, max: {}'.format(np.mean(first_a_list),np.std(first_a_list),np.max(first_a_list)))
-            # print('PVNet X-X^. mean: {} +/- {}, max: {}'.format(np.mean(first_v_list),np.std(first_v_list),np.max(first_v_list)))
-            print('ADD. mean: {} +/- {}, max: {}: '.format(np.mean(final_a_list),np.std(final_a_list),np.max(final_a_list)))
-            print('ADD perc increase. mean: {} +/- {}, max: {}'.format(np.mean(p_inc_list),np.std(p_inc_list),np.max(p_inc_list)))
-            print('X-X^ perc decrease. mean: {} +/- {}, max: {}'.format(np.mean(p_dec_v_list),np.std(p_dec_v_list),np.max(p_dec_v_list)))
-            # print('q-q^ perc decrease. mean: {} +/- {}, max: {}'.format(np.mean(p_dec_q_list),np.std(p_dec_q_list),np.max(p_dec_q_list))) 
-            # resultsFile.close()
+
+
+        # if ~train_cfg['gadi']:
+        print(train_cfg['exp_name'])
+        print(first_a_list)
+        print('PVNet ADD. mean: {} +/- {}, max: {}'.format(np.mean(first_a_list),np.std(first_a_list),np.max(first_a_list)))
+        # print('PVNet X-X^. mean: {} +/- {}, max: {}'.format(np.mean(first_v_list),np.std(first_v_list),np.max(first_v_list)))
+        print('ADD. mean: {} +/- {}, max: {}: '.format(np.mean(final_a_list),np.std(final_a_list),np.max(final_a_list)))
+        print('ADD perc increase. mean: {} +/- {}, max: {}'.format(np.mean(p_inc_list),np.std(p_inc_list),np.max(p_inc_list)))
+        print('X-X^ perc decrease. mean: {} +/- {}, max: {}'.format(np.mean(p_dec_v_list),np.std(p_dec_v_list),np.max(p_dec_v_list)))
+        # print('q-q^ perc decrease. mean: {} +/- {}, max: {}'.format(np.mean(p_dec_q_list),np.std(p_dec_q_list),np.max(p_dec_q_list))) 
+        # resultsFile.close()
 
 if __name__ == "__main__":
     train_net()

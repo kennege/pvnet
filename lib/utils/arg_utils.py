@@ -9,7 +9,7 @@ parser.add_argument('--net', action='store', dest='net', type=str)
 parser.add_argument('--type', action='store', dest='type', type=str)
 
 parser.add_argument('--cfg_file', type=str, default='configs/linemod_train.json')
-parser.add_argument('--linemod_cls', type=str, default='ape')
+parser.add_argument('--linemod_cls', type=str, default='glue')
 
 parser.add_argument('--use_gt_mask', action='store_true', dest='use_gt_mask', default=False)
 parser.add_argument('--test_model', action='store_true', dest='test_model', default=False)

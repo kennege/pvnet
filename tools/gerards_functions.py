@@ -12,62 +12,52 @@ def mask_and_save(image,mask,idx):
 
 import numpy as np 
 import matplotlib.pyplot as plt
+plt.rcParams.update({'font.size': 22})
 from datetime import date
-def plot_results(train_cfg,add_list,epoch,val_prefix):
-    distance = np.array(list(range(len(add_list)))) * (train_cfg["delta"])
-    # distance = deltas
-    # print(add_list)
-    # print(norm_v)
-    # print(norm_q)
-    # distance = np.array(list(range(iterations)))
-    # print((np.array(list(range(len(add_list)))) * train_cfg["delta"]).shape)
-    # print(deltas.shape)
-    # fig = plt.figure(figsize=[24,12])
-    # ax1 = plt.subplot(241)
-    plt.plot(distance,add_list)
-    # ax1.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
-    # ax1.set_title('ADD')
-    # ax1.set_xlabel(r"$\rho_E$")
-    plt.grid()
-    # ax2 = plt.subplot(242)
-    # ax2.plot(distance,proj_err_list)
-    # ax2.set_title('2D proj')
-    # ax2.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
-    # ax2.set_xlabel(r"$\rho_E$")
-    # ax2.grid()
-    # ax3 = plt.subplot(243)
-    # ax3.plot(distance[1:],norm_q[1:]/norm_q[1])
-    # ax3.set_title(r'$||q - \hat{q}||$')
-    # ax3.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
-    # ax3.set_xlabel(r"$\rho_E$")
+def plot_results(train_cfg,add_list,norm_v, pose_diffs, epoch,val_prefix):
+    add_list = [0.495, 0.645]
+    distance = np.array(list(range(len(add_list)))) * 1.2#train_cfg["delta"])
+    add_list_perc = [i * 100 for i in add_list]
+    fig1 = plt.figure(figsize=[12,12])
+    plt.plot(distance,add_list_perc)
+    plt.ylabel('ADD(S)')
+    plt.xlabel(r"$\rho$")
+    plt.grid()    
+    
+    # fig2 = plt.figure(figsize=[30,15])
+    # ax1 = plt.subplot(121)
+    # ax1.plot(distance,add_list_perc)
+    # ax1.set_xlabel(r"$\rho$")
+    # ax1.set_ylabel('ADD(S)')
+    # ax1.grid()
+    # ax2 = plt.subplot(122)
+    # ax2.plot(distance[1:],norm_v[1:]/norm_v[1])
+    # ax2.set_ylabel(r'$||X-\hat{X}||^2_2$')
+    # ax2.set_xlabel(r"$\rho$")
+    # ax2.grid()   
+    # ax3 = plt.subplot(133)
+    # ax3.plot(distance,pose_diffs/pose_diffs[0])
+    # ax3.set_ylabel(r'$||I_4 - P\hat{P}^{-1}||^2_F$') 
+    # ax3.set_xlabel(r"$\rho$")
     # ax3.grid()
-    # ax4 = plt.subplot(244)
-    # ax4.plot(distance[1:],norm_v[1:]/norm_v[1])
-    # ax4.set_title(r'$||x-\hat{x}||$')
-    # ax4.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
-    # ax4.set_xlabel(r"$\rho_E$")
-    # ax4.grid()
-    # ax5 = plt.subplot(246)
-    # ax5.plot(distance[1:],losses_vertex[1:]/losses_vertex[1])
-    # ax5.set_title(r'$\mathcal{L}_X$')
-    # ax5.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
-    # ax5.set_xlabel(r"$\rho_E$")
-    # ax5.grid()
-    # ax6 = plt.subplot(247)
-    # ax6.plot(distance[1:],losses_q[1:]/losses_q[1])
-    # ax6.set_title(r'$\mathcal{L}_q$')
-    # ax6.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
-    # ax6.set_xlabel(r"$\rho_E$")
-    # ax6.grid()
-    plt.suptitle(r"""Date: {}, Epoch: {} 
-        $T_T$ = {}, $\sigma$ = {}: $\rho_T$ = {}. 
-        $T_E$ = {}, $\delta$ = {}: $\rho_E$ = {}.""".format( \
-        date.today(),epoch,(train_cfg["train_iterations"]),train_cfg["sigma"],(train_cfg["train_iterations"])*train_cfg["sigma"],\
-        (train_cfg["eval_iterations"]),train_cfg["delta"],(train_cfg["eval_iterations"])*train_cfg["delta"]))
-    imNameEPS = '{}_{}_{}_{}_{}.eps'.format(date.today(),epoch-1,train_cfg["delta"],val_prefix,train_cfg['object'])
-    imNamePNG = '{}_{}_{}_{}_{}.png'.format(date.today(),epoch-1,train_cfg["delta"],val_prefix,train_cfg['object'])
-    plt.savefig(imNameEPS,format='eps')
-    plt.savefig(imNamePNG)
+    
+    # ax1.axvline(x=(train_cfg["train_iterations"]) * train_cfg["sigma"],color='gray',linestyle='--')
+ 
+  
+    # plt.suptitle(r"""Date: {}, Epoch: {} 
+    #     $T_T$ = {}, $\sigma$ = {}: $\rho_T$ = {}. 
+    #     $T_E$ = {}, $\delta$ = {}: $\rho_E$ = {}.""".format( \
+    #     date.today(),epoch,(train_cfg["train_iterations"]),train_cfg["sigma"],(train_cfg["train_iterations"])*train_cfg["sigma"],\
+    #     (train_cfg["eval_iterations"]),train_cfg["delta"],(train_cfg["eval_iterations"])*train_cfg["delta"]))
+    # imNameEPS = '{}_{}_{}_{}_{}.eps'.format(date.today(),epoch-1,train_cfg["eval_iterations"],val_prefix,train_cfg['object'])
+    # imNamePNG = '{}_{}_{}_{}_{}.png'.format(date.today(),epoch-1,train_cfg["eval_iterations"],val_prefix,train_cfg['object'])
+    # fig1.savefig(imNameEPS,format='eps')
+    # fig1.savefig(imNamePNG)
+
+    imNameEPS = '{}_{}_{}_{}_{}_both.eps'.format(date.today(),epoch-1,train_cfg["eval_iterations"],val_prefix,train_cfg['object'])
+    imNamePNG = '{}_{}_{}_{}_{}_both.png'.format(date.today(),epoch-1,train_cfg["eval_iterations"],val_prefix,train_cfg['object'])
+    fig1.savefig(imNameEPS,format='eps')
+    fig1.savefig(imNamePNG)
 
 
 def compute_step_size(alpha, vertex_pred, vertex_weights, q_pred, train_cfg,t):
@@ -130,7 +120,17 @@ def perturb_gt_input(vertex_init, hcoords, mask):
         vertex_init_pert[b,:,:,:] = v
     vertex_init_pert = vertex_init_pert.cuda()
     return vertex_init_pert
+
+def perturb_vertex_input(vertex_init, mask):
+    perturbation = np.random.random(vertex_init.shape) - 0.5
     
+    perturbed = vertex_init.cpu().numpy() + perturbation 
+    mask_perturbed = np.multiply(mask.cpu().numpy() , perturbed)
+    return torch.from_numpy(mask_perturbed).cuda().float()
+    
+    
+
+
 # def normalise_vector_field(vertex_init,vertex,vertex_weights):
     # normalise batch of vector fields to [-1,1] so that all values maintain original sign
     # batch_size = vertex_init.shape[0]
