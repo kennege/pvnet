@@ -138,7 +138,7 @@ class UncertaintyEvalWrapper(nn.Module):
         b,h,w,vn_2=vertex_pred.shape
         vertex_pred=vertex_pred.view(b,h,w,vn_2//2,2)
 
-        mean=ransac_voting_layer_v3(mask_pred, vertex_pred, 512, inlier_thresh=0.999)
+        mean=ransac_voting_layer_v3(mask_pred, vertex_pred, 512, inlier_thresh=0.99)
         mean, var=estimate_voting_distribution_with_mean(mask_pred,vertex_pred,mean)
         return mean, var
 
@@ -162,14 +162,15 @@ def train(net, PVNet, optimizer, dataloader, epoch):
         im = image#.half()
 
         # add u,v channels
-        b, _, h, w = image.shape
-        uv_map = torch.ones(2, h, w)
-        v_coor = torch.linspace(-1, 1, h).view(h, 1)
-        uv_map[0, ...] = torch.ones(h, w) * v_coor
-        u_coor = torch.linspace(-1, 1, w).view(1, w)
-        uv_map[1, ...] = torch.ones(h, w) * u_coor
-        padded_uv_map = torch.ones(b, 2, h, w)*uv_map
-        image = torch.cat((image,padded_uv_map.cuda()),1)
+        if train_cfg['UV']:
+            b, _, h, w = image.shape
+            uv_map = torch.ones(2, h, w)
+            v_coor = torch.linspace(-1, 1, h).view(h, 1)
+            uv_map[0, ...] = torch.ones(h, w) * v_coor
+            u_coor = torch.linspace(-1, 1, w).view(1, w)
+            uv_map[1, ...] = torch.ones(h, w) * u_coor
+            padded_uv_map = torch.ones(b, 2, h, w)*uv_map
+            image = torch.cat((image,padded_uv_map.cuda()),1)
         
         mask = mask.cuda()
         vertex = vertex.cuda()
@@ -252,20 +253,21 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='test', use_camera
                     seg_pred, vertex_init = PVNet(image)
                     mask_init = torch.argmax(seg_pred,1)
                     # vertex_init = vertex_init.float()
-                    vertex_init = perturb_vertex_input(vertex_init, mask_init)
+                    # vertex_init = perturb_vertex_input(vertex_init, mask_init)
                 else: 
                     vertex_init_pert = vertex_init
                     start = time.time()
 
                     # add u,v channels
-                    b, _, h, w = image.shape
-                    uv_map = torch.ones(2, h, w)
-                    v_coor = torch.linspace(-1, 1, h).view(h, 1)
-                    uv_map[0, ...] = torch.ones(h, w) * v_coor
-                    u_coor = torch.linspace(-1, 1, w).view(1, w)
-                    uv_map[1, ...] = torch.ones(h, w) * u_coor
-                    padded_uv_map = torch.ones(b, 2, h, w)*uv_map
-                    image = torch.cat((image,padded_uv_map.cuda()),1)
+                    if train_cfg['UV']:
+                        b, _, h, w = image.shape
+                        uv_map = torch.ones(2, h, w)
+                        v_coor = torch.linspace(-1, 1, h).view(h, 1)
+                        uv_map[0, ...] = torch.ones(h, w) * v_coor
+                        u_coor = torch.linspace(-1, 1, w).view(1, w)
+                        uv_map[1, ...] = torch.ones(h, w) * u_coor
+                        padded_uv_map = torch.ones(b, 2, h, w)*uv_map
+                        image = torch.cat((image,padded_uv_map.cuda()),1)
 
                     _, _, q_pred, loss, precision, recall = net(image, mask, vertex, vertex_weights, vertex_init_pert.detach(), vertex_init.detach())
                     end = time.time()
@@ -290,24 +292,24 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='test', use_camera
                             (np.linalg.norm((vertex_weights.cpu().numpy() * (vertex_init.cpu().numpy()- vertex.cpu().numpy())))**2)) 
 
                 if not train_cfg["gadi"]:
-                    # if args.use_uncertainty_pnp:
-                    mean,cov_inv=uncertain_eval_net(mask_init,vertex_init)
-                    mean=mean.cpu().numpy()
-                    cov_inv=cov_inv.cpu().numpy()
-                    # else: 
-                    # corner_pred=eval_net(mask_init,vertex_init).cpu().detach().numpy()
+                    if args.use_uncertainty_pnp:
+                        mean,cov_inv=uncertain_eval_net(mask_init,vertex_init)
+                        mean=mean.cpu().numpy()
+                        cov_inv=cov_inv.cpu().numpy()
+                    else: 
+                        corner_pred=eval_net(mask_init,vertex_init).cpu().detach().numpy()
                         
                     b=pose.shape[0]
                     pose_preds=[]
                     for bi in range(b):
                         intri_type='use_intrinsic' if use_camera_intrinsic else 'linemod'
                         K=Ks[bi].cpu().numpy() if use_camera_intrinsic else None
-                        # if args.use_uncertainty_pnp:
-                        pose_preds.append(evaluatorList[id].evaluate_uncertainty(mean[bi],cov_inv[bi],pose[bi],args.linemod_cls,
+                        if args.use_uncertainty_pnp:
+                            pose_preds.append(evaluatorList[id].evaluate_uncertainty(mean[bi],cov_inv[bi],pose[bi],args.linemod_cls,
                                                                     intri_type,vote_type,intri_matrix=K))
-                        # else:
-                        # pose_preds.append(evaluatorList[id].evaluate(corner_pred[bi],pose[bi],args.linemod_cls,intri_type,
-                        #     vote_type,intri_matrix=K))
+                        else:
+                            pose_preds.append(evaluatorList[id].evaluate(corner_pred[bi],pose[bi],args.linemod_cls,intri_type,
+                                vote_type,intri_matrix=K))
                         Rt = np.array(pose_preds)[0]
                         pose_mat_pred = np.vstack([Rt,[0,0,0,1]])                                                
                         pose_mat = np.vstack([pose[bi],[0,0,0,1]])
@@ -390,7 +392,6 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='test', use_camera
     if train_cfg['plot']:
         plot_results(train_cfg, add_list, norm_v, pose_diffs, epoch, val_prefix)
 
-
     with torch.no_grad():
         batch_size = image.shape[0]
         nrow = 5 if batch_size > 5 else batch_size
@@ -404,7 +405,6 @@ def val(net, PVNet, dataloader, epoch, lr, writer, val_prefix='test', use_camera
         and epoch%train_cfg['eval_inter']==0
         and epoch>=train_cfg['eval_epoch_begin']
         and val_prefix == 'val'): # or args.test_model:
-        print(val_prefix)
         proj_err,add,cm=evaluatorList[-1].average_precision(False)
         losses_batch['{}/scalar/projection_error'.format(val_prefix)]=proj_err
         losses_batch['{}/scalar/add'.format(val_prefix)]=add
@@ -436,8 +436,9 @@ def train_net():
     # resultsFileName = folders[0] + "{}_eval.txt".format(train_cfg['model_name'])
     # resultsFile = open(resultsFileName,"a+")
 
-    imNet=ImageUNet(ver_dim=(vote_num*2), seg_dim=2)
-    estNet = EstimateUNet(ver_dim=(vote_num*2), seg_dim=2)
+    im_dim = 5 if train_cfg['UV'] else 3
+    imNet=ImageUNet(ver_dim=(vote_num*2), seg_dim=2, im_dim=im_dim)
+    estNet = EstimateUNet(ver_dim=(vote_num*2), seg_dim=2, im_dim=im_dim)
     net=NetWrapper(imNet,estNet)
     net=DataParallel(net).cuda()
 
@@ -447,7 +448,6 @@ def train_net():
         PVModelDir='/home/gerard/xin_models/SEP_orgArc_{}_linemod_train/99.pth'.format(train_cfg['object'])
     PVNet=PVnet(ver_dim=vote_num*2, seg_dim=2)
     PVNet.load_state_dict(torch.load(PVModelDir)['net'])
-    # PVNet = PVNet.half()
     PVNet = DataParallel(PVNet).cuda()
     
     randomCropping = RandomScaleCrop()
@@ -479,9 +479,7 @@ def train_net():
         begin_epoch=load_model(net.module.imNet, net.module.estNet, optimizer, model_dir, args.load_epoch)
         
         if args.normal:
-            print('testing normal linemod ...') 
-
-            
+            print('testing normal linemod ...')           
             val_db= image_db.test_real_set+image_db.val_real_set
             val_set = LineModDatasetRealAug(val_db, randomCropping, cfg.LINEMOD, vote_type, augment=False, cfg=train_cfg['aug_cfg'], use_motion=motion_model)
             val_sampler = SequentialSampler(val_set)

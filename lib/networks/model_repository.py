@@ -79,7 +79,7 @@ class PVnet(nn.Module):
         return seg_pred, ver_pred
 
 class ImageEncoder(nn.Module):
-    def __init__(self, ver_dim, seg_dim, fcdim=256, s8dim=128, s4dim=64, s2dim=32, raw_dim=32):
+    def __init__(self, ver_dim, seg_dim, im_dim, fcdim=256, s8dim=128, s4dim=64, s2dim=32, raw_dim=32):
         super(ImageEncoder, self).__init__()
 
         # Load the pretrained weights, remove avg pool
@@ -98,7 +98,7 @@ class ImageEncoder(nn.Module):
             nn.BatchNorm2d(fcdim),
             nn.ReLU(True)
         )
-        resnet18_8s.conv1 = nn.Conv2d(5, 64, kernel_size=7, stride=2, padding=3,
+        resnet18_8s.conv1 = nn.Conv2d(im_dim, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
         self.resnet18_8s = resnet18_8s
 
@@ -108,7 +108,7 @@ class ImageEncoder(nn.Module):
         return x2s, x4s, x8s, xfc
 
 class EstimateEncoder(nn.Module):
-    def __init__(self, ver_dim, seg_dim, fcdim=256, s8dim=128, s4dim=64, s2dim=32, raw_dim=32, pre_trained=True):
+    def __init__(self, ver_dim, seg_dim, im_dim, fcdim=256, s8dim=128, s4dim=64, s2dim=32, raw_dim=32, pre_trained=True):
         super(EstimateEncoder, self).__init__()
 
         # Load the pretrained weights, remove avg pool
@@ -159,7 +159,7 @@ class EstimateEncoder(nn.Module):
         return x2s, x4s, x8s, xfc
 
 class ImageDecoder(nn.Module):
-    def __init__(self, ver_dim, seg_dim, fcdim=256, s8dim=128, s4dim=64, s2dim=32, raw_dim=32):
+    def __init__(self, ver_dim, seg_dim, im_dim, fcdim=256, s8dim=128, s4dim=64, s2dim=32, raw_dim=32):
         super(ImageDecoder, self).__init__()
 
         # x8s->128
@@ -186,7 +186,7 @@ class ImageDecoder(nn.Module):
         self.up2storaw = nn.UpsamplingBilinear2d(scale_factor=2)
 
         self.convraw = nn.Sequential(
-            nn.Conv2d(5+s2dim, raw_dim, 3, 1, 1, bias=False),
+            nn.Conv2d(im_dim+s2dim, raw_dim, 3, 1, 1, bias=False),
             nn.BatchNorm2d(raw_dim),
             nn.LeakyReLU(0.1,True),
             nn.Conv2d(raw_dim, seg_dim+ver_dim, 1, 1)
@@ -199,19 +199,10 @@ class ImageDecoder(nn.Module):
 
         fm=self.conv8s(torch.cat([xfcEst, xfc, x8s],1))
         fm=self.up8sto4s(fm)
-        del xfc
-        del x8s
- 
         fm=self.conv4s(torch.cat([fm,x4s, x4sEst],1))
         fm=self.up4sto2s(fm)
-        del x4s
-
         fm=self.conv2s(torch.cat([fm,x2s, x2sEst],1))
         fm=self.up2storaw(fm)
-        del x2s
-        torch.cuda.empty_cache()
-        gc.collect()
-
         x=self.convraw(torch.cat([fm,x],1))
         seg_pred=x[:,:self.seg_dim,:,:]
         q_pred=x[:,self.seg_dim:,:,:]
@@ -219,7 +210,7 @@ class ImageDecoder(nn.Module):
         return seg_pred, q_pred
 
 class EstimateDecoder(nn.Module):
-    def __init__(self, ver_dim, seg_dim, fcdim=256, s8dim=128, s4dim=64, s2dim=32, raw_dim=32):
+    def __init__(self, ver_dim, seg_dim, im_dim, fcdim=256, s8dim=128, s4dim=64, s2dim=32, raw_dim=32):
         super(EstimateDecoder, self).__init__()
 
         # x8s->128
@@ -270,11 +261,11 @@ class EstimateDecoder(nn.Module):
         return ver_pred, x2s, x4s, x8s
 
 class ImageUNet(nn.Module):
-    def __init__(self, ver_dim, seg_dim, fcdim=256, s8dim=128, s4dim=64, s2dim=32, raw_dim=32):
+    def __init__(self, ver_dim, seg_dim, im_dim=3, fcdim=256, s8dim=128, s4dim=64, s2dim=32, raw_dim=32):
         super(ImageUNet, self).__init__()
               
-        self.imageEncoder = ImageEncoder(ver_dim, seg_dim, fcdim, s8dim, s4dim, s2dim, raw_dim)
-        self.imageDecoder = ImageDecoder(ver_dim, seg_dim, fcdim, s8dim, s4dim, s2dim, raw_dim)
+        self.imageEncoder = ImageEncoder(ver_dim, seg_dim, im_dim, fcdim, s8dim, s4dim, s2dim, raw_dim)
+        self.imageDecoder = ImageDecoder(ver_dim, seg_dim, im_dim, fcdim, s8dim, s4dim, s2dim, raw_dim)
 
     def forward(self, img, x2sEst, x4sEst, x8sEst, xfcEst):
         x2sIm, x4sIm, x8sIm, xfcIm = self.imageEncoder(img)       
@@ -283,10 +274,10 @@ class ImageUNet(nn.Module):
         return seg_pred, q_pred
             
 class EstimateUNet(nn.Module):
-    def __init__(self, ver_dim, seg_dim, fcdim=256, s8dim=128, s4dim=64, s2dim=32, raw_dim=32):
+    def __init__(self, ver_dim, seg_dim, im_dim=3, fcdim=256, s8dim=128, s4dim=64, s2dim=32, raw_dim=32):
         super(EstimateUNet, self).__init__()
-        self.estimateEncoder = EstimateEncoder(ver_dim, seg_dim, fcdim, s8dim, s4dim, s2dim, raw_dim)
-        self.estimateDecoder = EstimateDecoder(ver_dim, seg_dim, fcdim, s8dim, s4dim, s2dim, raw_dim)
+        self.estimateEncoder = EstimateEncoder(ver_dim, seg_dim, im_dim, fcdim, s8dim, s4dim, s2dim, raw_dim)
+        self.estimateDecoder = EstimateDecoder(ver_dim, seg_dim, im_dim, fcdim, s8dim, s4dim, s2dim, raw_dim)
 
     def forward(self, vertexEst):
         x2sEst, x4sEst, x8sEst, xfcEst = self.estimateEncoder(vertexEst)

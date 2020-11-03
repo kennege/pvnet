@@ -9,7 +9,8 @@
   "sigma":0.6,
   "train_iterations":2,
   "skips":1,
-
+  "UV":false,
+  
   "delta":1.2, 
   "eval_iterations":1, 
   "initial_est":"pvnet",
@@ -23,7 +24,7 @@
   "lr":1e-3,
   "lr_decay_rate":0.85,
   "lr_decay_epoch":10,
-  "train_batch_size":128,
+  "train_batch_size":64,
   "test_batch_size":1,
   "motion_model":false,
 
