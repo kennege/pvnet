@@ -4,12 +4,12 @@
   "network":"resnet18_8s",
   "gadi":false,
   
-  "object":"ape",
+  "object":"cat",
   "exp_name":"2109",
   "sigma":0.6,
   "train_iterations":2,
   "skips":1,
-  "UV":false,
+  "UV":true,
   
   "delta":1.2, 
   "eval_iterations":1, 
@@ -28,7 +28,7 @@
   "test_batch_size":1,
   "motion_model":false,
 
-  "resume":false,
+  "resume":true,
   "finetune":false,
   "epoch_num":50,
 
